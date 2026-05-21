@@ -1,0 +1,108 @@
+"""Command parsing, metadata, and execution for Klimt."""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any, Callable, Literal
+
+from . import skills, tools
+
+BusyPolicy = Literal["allow", "block", "background"]
+
+
+@dataclass(frozen=True)
+class CommandSpec:
+    name: str
+    usage: str
+    description: str
+    busy: BusyPolicy = "block"
+
+
+SPECS: tuple[CommandSpec, ...] = (
+    CommandSpec("!", "!<cmd>", "Run a shell command directly and show the result as a tool box.", "background"),
+    CommandSpec("/help", "/help", "Show this help.", "allow"),
+    CommandSpec("/skills", "/skills", "List available skills with short descriptions.", "allow"),
+    CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
+    CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session."),
+    CommandSpec("/new", "/new", "Start a completely new empty session."),
+    CommandSpec("/sessions", "/sessions [resume|delete|clear] ...", "List, resume, delete, or clear saved sessions for this folder."),
+    CommandSpec("/name", "/name [name]", "Show or rename the current session."),
+    CommandSpec("/reload", "/reload", "Reload config, skills, tools, model endpoint, and CSS."),
+    CommandSpec("/quit", "/quit", "Close Klimt."),
+    CommandSpec("/<skill>", "/<skill>", "Load ~/.klimt/skills/<skill>/SKILL.md into the conversation."),
+)
+
+
+def _slash_name(text: str) -> str:
+    return text.split(None, 1)[0]
+
+
+def classify(text: str) -> CommandSpec | None:
+    command = text.strip()
+    if not command:
+        return None
+    if command.startswith("!"):
+        return SPECS[0]
+    if not command.startswith("/"):
+        return None
+
+    head = _slash_name(command)
+    for spec in SPECS:
+        if spec.name == head:
+            return spec
+    if skills.find_skill(command[1:].split(None, 1)[0]):
+        return next(s for s in SPECS if s.name == "/<skill>")
+    return next(s for s in SPECS if s.name == "/<skill>")
+
+
+def help_markdown(format_session_help: Callable[[], list[str]] | None = None) -> str:
+    lines = [
+        "## Commands",
+        "",
+        "| command | description |",
+        "|---|---|",
+    ]
+    for spec in SPECS:
+        lines.append(f"| `{spec.usage}` | {spec.description} |")
+
+    if format_session_help:
+        lines.extend(format_session_help())
+
+    lines.extend([
+        "",
+        "## Keys",
+        "",
+        "| key | action |",
+        "|---|---|",
+        "| `Enter` | Send. |",
+        "| `Shift+Enter` | Insert newline. |",
+        "| `Esc` | Interrupt current work. |",
+    ])
+    return "\n".join(lines)
+
+
+def run_shell(session: Any, command: str) -> list[dict[str, Any]]:
+    if not command:
+        return []
+    result = tools.run("bash", {"command": command}, session._cancel)
+    if not session._cancel.is_set():
+        session.history.append({"role": "user", "content": f"$ {command}\n{result}"})
+    events: list[dict[str, Any]] = [{
+        "type": "tool",
+        "name": "bash",
+        "args": {"command": command},
+        "result": result,
+    }]
+    if session._cancel.is_set():
+        events.append({"type": "error", "message": "interrupted"})
+    return events
+
+
+def load_skill(session: Any, name: str) -> list[dict[str, Any]]:
+    if not name:
+        return [{"type": "text", "content": "_usage: `/<skill-name>`_"}]
+    path = skills.find_skill(name)
+    if not path:
+        return [{"type": "text", "content": f"_unknown skill: `{name}`_"}]
+    body = path.read_text(encoding="utf-8")
+    session.history.append({"role": "user", "content": f"[Skill loaded: {name}]\n\n{body}"})
+    return [{"type": "text", "content": f"loaded skill **{name}** (`{path}`)"}]

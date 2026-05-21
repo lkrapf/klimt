@@ -11,7 +11,7 @@ from typing import Any, Callable, Dict, List
 
 from openai import AzureOpenAI, OpenAI
 
-from . import skills, tools
+from . import tools
 from .model_config import ModelConfig, resolve_model_config
 from .session_store import DEFAULT_SESSION, UNTITLED_PREFIX, SessionStore, random_session_name, title_from_prompt
 
@@ -377,18 +377,6 @@ class ChatSession:
           {type: 'error', message: str}
         """
         self._cancel.clear()
-        text = user_text.strip()
-        if text.startswith("!"):
-            for e in self._run_shell(text[1:].strip()):
-                emit(e)
-            self.persist()
-            return
-        if text.startswith("/"):
-            for e in self._run_skill(text[1:].strip()):
-                emit(e)
-            self.persist()
-            return
-
         self.history.append({"role": "user", "content": user_text})
 
         while True:
@@ -509,35 +497,3 @@ class ChatSession:
                     "content": result,
                 })
                 self.persist()
-
-    # ---- prefix handlers -------------------------------------------------
-
-    def _run_shell(self, command: str) -> List[Event]:
-        if not command:
-            return []
-        result = tools.run("bash", {"command": command}, self._cancel)
-        if not self._cancel.is_set():
-            self.history.append(
-                {"role": "user", "content": f"$ {command}\n{result}"}
-            )
-        events = [{
-            "type": "tool",
-            "name": "bash",
-            "args": {"command": command},
-            "result": result,
-        }]
-        if self._cancel.is_set():
-            events.append({"type": "error", "message": "interrupted"})
-        return events
-
-    def _run_skill(self, name: str) -> List[Event]:
-        if not name:
-            return [{"type": "text", "content": "_usage: `/<skill-name>`_"}]
-        path = skills.find_skill(name)
-        if not path:
-            return [{"type": "text", "content": f"_unknown skill: `{name}`_"}]
-        body = path.read_text(encoding="utf-8")
-        self.history.append(
-            {"role": "user", "content": f"[Skill loaded: {name}]\n\n{body}"}
-        )
-        return [{"type": "text", "content": f"loaded skill **{name}** (`{path}`)"}]

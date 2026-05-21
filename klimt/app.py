@@ -14,7 +14,7 @@ from typing import Any
 
 import webview
 
-from . import __version__, skills, tools
+from . import __version__, commands, skills, tools
 from .api import ChatSession
 from .model_config import default_model_name, list_model_configs, list_model_names
 
@@ -157,12 +157,14 @@ class Api:
         background = False
         try:
             command = text.strip()
-            if command == "/new":
-                self._new()
-                return {"ok": True}
-            if command == "/sessions" or command.startswith("/sessions "):
-                self._sessions(command[9:].strip())
-                return {"ok": True}
+            spec = commands.classify(command)
+            if spec:
+                if spec.busy == "block" and self._is_busy():
+                    self._emit({"type": "error", "message": "session is still busy; press Esc to interrupt"})
+                    return {"ok": False, "error": "session busy"}
+                handled = self._handle_command(command, spec)
+                if handled:
+                    return {"ok": True}
 
             renamed = self._session.maybe_title_from_first_input(command)
             self._session.remember_input(command)
@@ -170,27 +172,6 @@ class Api:
             if renamed:
                 self._emit({"type": "text", "content": f"session named **{self._session.session_name}**"})
             self._sync_input_history()
-            if command == "/compact" or command.startswith("/compact "):
-                self._compact(command[8:].strip())
-                return {"ok": True}
-            if command == "/help":
-                self._help()
-                return {"ok": True}
-            if command == "/skills":
-                self._skills()
-                return {"ok": True}
-            if command == "/reload":
-                self._reload()
-                return {"ok": True}
-            if command == "/quit":
-                self._quit()
-                return {"ok": True}
-            if command == "/name" or command.startswith("/name "):
-                self._name(command[5:].strip())
-                return {"ok": True}
-            if command == "/model" or command.startswith("/model "):
-                self._model(command[6:].strip())
-                return {"ok": True}
             with self._busy_lock:
                 if self._busy:
                     self._emit({"type": "error", "message": "session is still busy; press Esc to interrupt"})
@@ -215,6 +196,50 @@ class Api:
             if not background:
                 with contextlib.suppress(Exception):
                     self._done()
+
+    def _is_busy(self) -> bool:
+        with self._busy_lock:
+            return self._busy
+
+    def _handle_command(self, command: str, spec: commands.CommandSpec) -> bool:
+        if command.startswith("!"):
+            for e in commands.run_shell(self._session, command[1:].strip()):
+                self._emit(e)
+            self._session.persist()
+            return True
+        if command == "/new":
+            self._new()
+            return True
+        if command == "/sessions" or command.startswith("/sessions "):
+            self._sessions(command[9:].strip())
+            return True
+        if command == "/compact" or command.startswith("/compact "):
+            self._compact(command[8:].strip())
+            return True
+        if command == "/help":
+            self._help()
+            return True
+        if command == "/skills":
+            self._skills()
+            return True
+        if command == "/reload":
+            self._reload()
+            return True
+        if command == "/quit":
+            self._quit()
+            return True
+        if command == "/name" or command.startswith("/name "):
+            self._name(command[5:].strip())
+            return True
+        if command == "/model" or command.startswith("/model "):
+            self._model(command[6:].strip())
+            return True
+        if command.startswith("/"):
+            for e in commands.load_skill(self._session, command[1:].strip()):
+                self._emit(e)
+            self._session.persist()
+            return True
+        return False
 
     def _stream_worker(self, session: ChatSession, text: str, generation: int) -> None:
         emit = lambda event: self._emit_current(generation, event)
@@ -299,22 +324,11 @@ class Api:
         }
 
     def _help(self) -> None:
-        lines = [
-            "## Commands",
-            "",
-            "| command | description |",
-            "|---|---|",
-            "| `!<cmd>` | Run a shell command directly and show the result as a tool box. |",
-            "| `/help` | Show this help. |",
-            "| `/skills` | List available skills with short descriptions. |",
-            "| `/compact [N]` | Compact older context, keeping the last N history messages raw. Default: 8. |",
-            "| `/model [name]` | Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`. |",
-            "| `/reload` | Reload `~/.klimt/AGENTS.md`, skills, tools, Azure client config, and CSS. |",
-            "| `/new` | Start a completely new empty session. |",
-            "| `/sessions` | List, resume, delete, or clear saved sessions for this folder. |",
-            "| `/name [name]` | Without an argument, show the current session name. With a name, rename the current session. |",
-            "| `/<skill>` | Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation. |",
-            "| `/quit` | Close Klimt. |",
+        self._emit({"type": "text", "content": commands.help_markdown(self._session_help_lines)})
+
+    @staticmethod
+    def _session_help_lines() -> list[str]:
+        return [
             "",
             "## `/sessions`",
             "",
@@ -323,17 +337,7 @@ class Api:
             "- `/sessions resume <number|name>` — resume a session from the latest list, or by name.",
             "- `/sessions delete <number|name>` — delete a saved session. Deleting the active session starts a new one.",
             "- `/sessions clear confirm` — delete all saved sessions for this folder and start a new one.",
-            "",
-            "## Keys",
-            "",
-            "| key | action |",
-            "|---|---|",
-            "| `Enter` | Send. |",
-            "| `Shift+Enter` | Insert newline. |",
-            "| `Esc` | Interrupt current work. |",
         ]
-
-        self._emit({"type": "text", "content": "\n".join(lines)})
 
     def _skills(self) -> None:
         items = skills.list_skills()
