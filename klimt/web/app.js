@@ -11,12 +11,22 @@ window.klimt = klimt;
 installEventHandler(klimt, () => finishWork(klimt), setInputHistory);
 installInputHandlers(klimt);
 
-window.addEventListener("pywebviewready", async () => {
+let initialized = false;
+
+async function initialize() {
+  if (initialized || !window.pywebview?.api) return;
+  initialized = true;
   try {
     const info = await window.pywebview.api.info();
     setSessionLabel(info.model, info.session);
     setInputHistory(info.input_history);
     setContextUsage(info.context);
     addStartup(info);
-  } catch (_) {}
-});
+  } catch (e) {
+    initialized = false;
+    console.error("Klimt startup failed", e);
+  }
+}
+
+window.addEventListener("pywebviewready", initialize);
+initialize();
