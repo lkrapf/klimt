@@ -9,10 +9,9 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
-from openai import AzureOpenAI, OpenAI
-
 from . import tools
 from .model_config import ModelConfig, resolve_model_config
+from .providers import ChatProvider
 from .session_store import DEFAULT_SESSION, UNTITLED_PREFIX, SessionStore, random_session_name, title_from_prompt
 
 Event = Dict[str, Any]
@@ -151,31 +150,6 @@ def _estimate_context_tokens(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     }
 
 
-def _make_client(config: ModelConfig | None = None) -> Any:
-    config = config or resolve_model_config("")
-    if config.provider == "azure":
-        return AzureOpenAI(
-            azure_endpoint=config.base_url or os.environ["AZURE_OPENAI_BASE_URL"],
-            api_key=config.resolved_api_key(),
-            api_version=config.api_version or os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
-        )
-    if config.provider in {"openai", "ollama"}:
-        kwargs: Dict[str, Any] = {"api_key": config.resolved_api_key()}
-        if config.provider == "ollama":
-            kwargs["base_url"] = config.base_url or os.environ.get("OLLAMA_BASE_URL", "http://127.0.0.1:11434/v1")
-        elif config.base_url:
-            kwargs["base_url"] = config.base_url
-        return OpenAI(**kwargs)
-    if config.provider == "anthropic":
-        # Anthropic support uses its OpenAI-compatible endpoint. Tool calling via
-        # this compatibility layer may not support every Anthropic-native feature.
-        return OpenAI(
-            api_key=config.resolved_api_key(),
-            base_url=config.base_url or os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com/v1"),
-        )
-    raise ValueError(f"unsupported model provider: {config.provider}")
-
-
 @dataclass
 class ChatSession:
     # For Azure, "model" is the deployment name. For other providers, it is the
@@ -188,7 +162,7 @@ class ChatSession:
     session_name: str = field(default_factory=random_session_name)
     input_history: List[str] = field(default_factory=list)
     store: SessionStore = field(default_factory=SessionStore, repr=False)
-    _client: Any = field(default=None, init=False, repr=False)
+    _provider: ChatProvider = field(default=None, init=False, repr=False)
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
     _active_stream: Any = field(default=None, init=False, repr=False)
     _active_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -201,7 +175,7 @@ class ChatSession:
         return resolve_model_config(self.model)
 
     def provider_model(self) -> str:
-        return self.model_config().provider_model()
+        return self._provider.provider_model()
 
     def interrupt(self) -> None:
         """Ask the current request/tool to stop as soon as possible."""
@@ -351,8 +325,7 @@ class ChatSession:
         return f"compacted {len(old)} messages into {len(note)} chars; kept {len(recent)} recent messages"
 
     def _compact_text(self, text: str) -> str:
-        response = self._client.chat.completions.create(
-            model=self.provider_model(),
+        response = self._provider.complete(
             messages=[
                 {"role": "system", "content": COMPACTION_PROMPT},
                 {"role": "user", "content": text},
@@ -363,7 +336,7 @@ class ChatSession:
         return (content or "").strip() or "# Compacted context\n\n- compaction returned no content"
 
     def reload_client(self) -> None:
-        self._client = _make_client(self.model_config())
+        self._provider = ChatProvider(self.model_config())
 
     def stream(self, user_text: str, emit: Emit) -> None:
         """Push events for one user turn.
@@ -384,16 +357,13 @@ class ChatSession:
                 emit({"type": "error", "message": "interrupted"})
                 return
 
-            stream = self._client.chat.completions.create(
-                model=self.provider_model(),
+            stream = self._provider.stream(
                 messages=[
                     {"role": "system", "content": self.system},
                     *[{k: v for k, v in m.items() if k != "usage"} for m in self.history],
                 ],
-                tools=tools.SCHEMAS,
+                tool_schemas=tools.SCHEMAS,
                 max_completion_tokens=self.max_tokens,
-                stream=True,
-                stream_options={"include_usage": True},
             )
             with self._active_lock:
                 self._active_stream = stream
