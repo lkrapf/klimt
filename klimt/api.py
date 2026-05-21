@@ -262,7 +262,13 @@ class ChatSession:
             cutoff -= 1
 
         old = self.history[:cutoff]
-        recent = self.history[cutoff:]
+        # Usage metadata on retained assistant messages describes the pre-compaction
+        # request context. Once old history is replaced by a summary, those totals
+        # are stale, so drop them and let context_usage() estimate the new history.
+        recent = [
+            {k: v for k, v in msg.items() if k != "usage"}
+            for msg in self.history[cutoff:]
+        ]
         if not old:
             return "nothing to compact"
 
