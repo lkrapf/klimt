@@ -14,19 +14,8 @@ export function escapeMd(text) {
   return String(text ?? "").replace(/[\\`*_{}\[\]()#+.!|>]/g, "\\$&");
 }
 
-function escapeHtml(text) {
-  return String(text ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;");
-}
-
-function codeCell(text) {
-  // Markdown escapes are literal inside code spans. Use inline HTML instead so
-  // command syntax like [N], <skill>, and <cmd> displays cleanly. Encode pipes
-  // as entities so the Markdown table parser does not split the cell.
-  return "<code>" + escapeHtml(text).replace(/\|/g, "&#124;") + "</code>";
+function codeSpan(text) {
+  return "`" + String(text ?? "") + "`";
 }
 
 export function addBannerLogo() {
@@ -64,7 +53,7 @@ export function addStartup(info) {
   if (commands.length) {
     lines.push("", "| command | description |", "|---|---|");
     for (const c of commands) {
-      const usage = codeCell(c.usage || "");
+      const usage = codeSpan(c.usage || "");
       const desc = escapeMd(c.description || "");
       lines.push("| " + usage + " | " + desc + " |");
     }
