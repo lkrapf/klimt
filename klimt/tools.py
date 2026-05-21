@@ -20,6 +20,8 @@ BASH_TIMEOUT = 120  # seconds
 WEBFETCH_TIMEOUT = 30  # seconds
 WEBFETCH_MAX_BYTES = 2_000_000
 WEBSEARCH_MAX_RESULTS = 5
+WEBFETCH_MAX_TEXT_CHARS = 200_000
+WEBFETCH_MAX_LINKS = 40
 
 SCHEMAS = [
     {
@@ -107,6 +109,66 @@ def _write(path: str, content: str) -> str:
     return f"wrote {len(content)} bytes to {p}"
 
 
+
+class _HTMLTextParser(html.parser.HTMLParser):
+    """Extract compact visible text and links from HTML."""
+
+    _skip_tags = {"script", "style", "noscript", "template", "svg"}
+    _block_tags = {
+        "address", "article", "aside", "blockquote", "br", "dd", "div", "dl", "dt",
+        "fieldset", "figcaption", "figure", "footer", "form", "h1", "h2", "h3",
+        "h4", "h5", "h6", "header", "hr", "li", "main", "nav", "ol", "p", "pre",
+        "section", "table", "tbody", "td", "tfoot", "th", "thead", "tr", "ul",
+    }
+
+    def __init__(self, base_url: str) -> None:
+        super().__init__(convert_charrefs=True)
+        self.base_url = base_url
+        self.parts: list[str] = []
+        self.links: list[tuple[str, str]] = []
+        self._skip_depth = 0
+        self._link_href: str | None = None
+        self._link_text: list[str] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag = tag.lower()
+        if tag in self._skip_tags:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+        if tag in self._block_tags:
+            self.parts.append("\n")
+        if tag == "a":
+            href = dict(attrs).get("href")
+            self._link_href = urllib.parse.urljoin(self.base_url, href or "") if href else None
+            self._link_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth:
+            return
+        self.parts.append(data)
+        if self._link_href:
+            self._link_text.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.lower()
+        if tag in self._skip_tags and self._skip_depth:
+            self._skip_depth -= 1
+            return
+        if self._skip_depth:
+            return
+        if tag == "a" and self._link_href:
+            text = _clean_text("".join(self._link_text))
+            href = self._link_href
+            if text and href.startswith(("http://", "https://")):
+                self.links.append((text, href))
+            self._link_href = None
+            self._link_text = []
+        if tag in self._block_tags:
+            self.parts.append("\n")
+
+
 class _DuckDuckGoHTMLParser(html.parser.HTMLParser):
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -171,6 +233,46 @@ def _clean_text(s: str) -> str:
     return " ".join(s.split())
 
 
+def _clean_visible_text(s: str) -> str:
+    lines = [_clean_text(line) for line in s.splitlines()]
+    compact: list[str] = []
+    blank = False
+    for line in lines:
+        if not line:
+            if compact and not blank:
+                compact.append("")
+            blank = True
+            continue
+        compact.append(line)
+        blank = False
+    return "\n".join(compact).strip()
+
+
+def _is_html_content(content_type: str, url: str) -> bool:
+    ctype = content_type.lower()
+    if "text/html" in ctype or "application/xhtml+xml" in ctype:
+        return True
+    return not ctype and url.lower().split("?", 1)[0].endswith((".html", ".htm"))
+
+
+def _html_to_text(body: str, base_url: str) -> tuple[str, list[tuple[str, str]]]:
+    parser = _HTMLTextParser(base_url)
+    parser.feed(body)
+    text = _clean_visible_text("".join(parser.parts))
+
+    seen: set[str] = set()
+    links: list[tuple[str, str]] = []
+    for title, href in parser.links:
+        key = href
+        if key in seen:
+            continue
+        seen.add(key)
+        links.append((title, href))
+        if len(links) >= WEBFETCH_MAX_LINKS:
+            break
+    return text, links
+
+
 def _websearch(query: str) -> str:
     query = query.strip()
     if not query:
@@ -230,10 +332,35 @@ def _webfetch(url: str) -> str:
         raw = raw[:WEBFETCH_MAX_BYTES]
         charset = r.headers.get_content_charset() or "utf-8"
         body = raw.decode(charset, errors="replace")
+        final_url = r.geturl()
+        content_type = r.headers.get("Content-Type", "")
         headers = "".join(f"{k}: {v}\n" for k, v in r.headers.items())
         note = f"\n[truncated to {WEBFETCH_MAX_BYTES} bytes]" if truncated else ""
+
+        if _is_html_content(content_type, final_url):
+            text, links = _html_to_text(body, final_url)
+            text_truncated = len(text) > WEBFETCH_MAX_TEXT_CHARS
+            text = text[:WEBFETCH_MAX_TEXT_CHARS].rstrip()
+            text_note = (
+                f"\n[visible text truncated to {WEBFETCH_MAX_TEXT_CHARS} chars]"
+                if text_truncated else ""
+            )
+            link_lines = ""
+            if links:
+                link_lines = "\n--- links ---\n" + "".join(
+                    f"- {title}: {href}\n" for title, href in links
+                )
+            return (
+                f"url: {final_url}\n"
+                f"status: {r.status} {r.reason}\n"
+                f"--- headers ---\n{headers}"
+                "--- body: visible text extracted from HTML ---\n"
+                f"{text or '[no visible text extracted]'}{text_note}{note}"
+                f"{link_lines}"
+            )
+
         return (
-            f"url: {r.geturl()}\n"
+            f"url: {final_url}\n"
             f"status: {r.status} {r.reason}\n"
             f"--- headers ---\n{headers}"
             f"--- body ---\n{body}{note}"
