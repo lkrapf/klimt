@@ -76,6 +76,9 @@ Handled in `ChatSession.send` before any model call:
 - `/name` — loads `~/.klimt/skills/<name>/SKILL.md` and appends its body to
   history as a user message. Match is by directory name, then by frontmatter
   `name:`. No model call.
+- `/reload` — reloads `~/.klimt/AGENTS.md`, skill discovery, `tools.py`, the
+  Azure client/model config, and asks the frontend to cache-bust `style.css`.
+  No model call. Conversation history is kept.
 
 At startup `app.py` enumerates all skills and appends a `## Available skills`
 block (name + description) to the system prompt. The model knows what exists

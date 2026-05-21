@@ -1,8 +1,8 @@
 :root {
-  --bg: #2a1700;
-  --fg: #ffb000;
-  --dim: #a06800;
-  --hot: #ffd76a;
+  --bg: #150a00;
+  --fg: #ffc94d;
+  --dim: #b07a1c;
+  --hot: #ffe48a;
   --border: #5a3a00;
   --mono: "IBM Plex Mono", "Berkeley Mono", "Menlo", ui-monospace, monospace;
   --glow: 0 0 2px #ffb00088, 0 0 6px #ff8c0044;
@@ -60,19 +60,43 @@ html, body, .msg, .msg * {
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
 }
-#title { color: var(--hot); letter-spacing: 2px; text-transform: uppercase; }
-#title::before { content: "█ "; }
-.muted { color: var(--dim); font-size: 12px; }
-
-#reset {
-  margin-left: auto;
-  background: transparent; color: var(--dim);
-  border: 1px solid var(--border);
-  padding: 2px 8px; cursor: pointer; font: inherit; font-size: 12px;
-  text-transform: uppercase; letter-spacing: 1px;
-  text-shadow: var(--glow);
+#title {
+  color: var(--hot);
+  letter-spacing: 0;
+  text-transform: none;
 }
-#reset:hover { color: var(--hot); border-color: var(--fg); }
+.muted { color: var(--dim); font-size: 12px; }
+.context.warning { color: #ffb347; }
+.context.danger { color: #ff6a3a; }
+.status {
+  margin-left: auto;
+  color: var(--hot);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+body.working .status {
+  color: var(--hot);
+  animation: working-soft-pulse 1.4s ease-in-out infinite;
+}
+body.working .status::before {
+  content: "[";
+  color: var(--dim);
+}
+body.working .status::after {
+  content: "]";
+  color: var(--dim);
+}
+@keyframes working-soft-pulse {
+  0%, 100% {
+    opacity: 0.65;
+    text-shadow: var(--glow);
+  }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 3px #ffb000aa, 0 0 8px #ff8c0044;
+  }
+}
+
 
 #transcript {
   overflow-y: auto;
@@ -80,6 +104,13 @@ html, body, .msg, .msg * {
   min-height: 0;
   padding: 14px 18px;
   display: flex; flex-direction: column; gap: 14px;
+}
+
+.startup-mark {
+  align-self: flex-start;
+  margin: 4px 0 2px;
+  color: var(--hot);
+  font-size: 24px;
 }
 
 .msg, .msg .body { min-width: 0; }
@@ -109,8 +140,15 @@ html, body, .msg, .msg * {
 .msg.tool      .role::before { content: "$ "; color: var(--hot); }
 .msg.tool      .role         { color: var(--hot); }
 .msg.tool      .tool-call    {
-  background: transparent; border: none; padding: 0; margin: 0;
-  color: var(--hot); white-space: pre-wrap; word-break: break-word;
+  background: #00000055;
+  border: 1px dashed var(--border);
+  padding: 8px 10px;
+  margin: 0;
+  color: var(--hot);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
+  overflow-x: auto;
 }
 .msg.tool      .tool-out     {
   background: #00000055; border: 1px dashed var(--border);
@@ -119,6 +157,7 @@ html, body, .msg, .msg * {
   max-height: 320px; overflow: auto;
 }
 
+.msg .body.plain { white-space: pre-wrap; }
 .msg .body p:first-child { margin-top: 0; }
 .msg .body p:last-child  { margin-bottom: 0; }
 .msg pre {
@@ -133,6 +172,62 @@ html, body, .msg, .msg * {
   padding: 0 4px;
   border: 1px dashed var(--border);
 }
+
+/* syntax-highlighted markdown code blocks
+   Keep highlight.js inside the terminal's amber palette. No rainbow syntax. */
+.msg pre code.hljs {
+  display: block;
+  overflow-x: visible;
+  padding: 0;
+  background: transparent;
+  color: var(--fg);
+}
+.msg .hljs-comment,
+.msg .hljs-quote {
+  color: var(--dim);
+  font-style: italic;
+}
+.msg .hljs-keyword,
+.msg .hljs-selector-tag,
+.msg .hljs-subst {
+  color: var(--hot);
+  font-weight: bold;
+}
+.msg .hljs-string,
+.msg .hljs-regexp,
+.msg .hljs-symbol,
+.msg .hljs-bullet {
+  color: var(--fg);
+}
+.msg .hljs-number,
+.msg .hljs-literal,
+.msg .hljs-variable,
+.msg .hljs-template-variable,
+.msg .hljs-attribute {
+  color: #ffb93d;
+}
+.msg .hljs-title,
+.msg .hljs-section,
+.msg .hljs-name,
+.msg .hljs-selector-id,
+.msg .hljs-selector-class {
+  color: var(--hot);
+}
+.msg .hljs-type,
+.msg .hljs-built_in,
+.msg .hljs-builtin-name,
+.msg .hljs-tag {
+  color: #ffd36a;
+}
+.msg .hljs-meta,
+.msg .hljs-link {
+  color: var(--dim);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+.msg .hljs-emphasis { font-style: italic; }
+.msg .hljs-strong { font-weight: bold; }
+
 .msg a { color: var(--hot); text-decoration: underline; }
 .msg img {
   max-width: 100%;
@@ -207,7 +302,9 @@ html, body, .msg, .msg * {
 }
 #input {
   flex: 1; resize: none;
-  min-height: 48px; max-height: 240px;
+  min-height: 34px; max-height: 240px;
+  height: 34px;
+  overflow-y: hidden;
   background: transparent;
   color: var(--fg);
   border: 1px solid var(--border);
@@ -218,16 +315,6 @@ html, body, .msg, .msg * {
 }
 #input:focus { outline: none; border-color: var(--fg); }
 
-#send {
-  background: transparent;
-  color: var(--hot);
-  border: 1px solid var(--fg);
-  padding: 0 14px; cursor: pointer;
-  font: inherit; text-transform: uppercase; letter-spacing: 2px;
-  text-shadow: var(--glow);
-}
-#send:hover  { background: var(--fg); color: #2a1700; text-shadow: none; }
-#send:disabled { opacity: 0.4; cursor: progress; }
 
 .msg.streaming .body::after {
   content: "\2588";

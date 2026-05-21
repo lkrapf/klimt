@@ -3,26 +3,27 @@
 <head>
   <meta charset="utf-8" />
   <title>Klimt</title>
-  <link rel="stylesheet" href="style.css" />
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
+  <link rel="stylesheet" href="style.css" />
 
-  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@15.0.12/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.2.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@highlightjs/cdn-assets@11.10.0/highlight.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
   <script type="module">
-    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+    import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11.6.0/dist/mermaid.esm.min.mjs";
     mermaid.initialize({
       startOnLoad: false,
       theme: "base",
       themeVariables: {
-        background: "#2a1700",
+        background: "#150a00",
         primaryColor: "#2a1800",
-        primaryTextColor: "#ffb000",
-        primaryBorderColor: "#ffb000",
-        lineColor: "#ffb000",
+        primaryTextColor: "#ffc94d",
+        primaryBorderColor: "#ffc94d",
+        lineColor: "#ffc94d",
         secondaryColor: "#3a2400",
-        tertiaryColor: "#2a1700",
+        tertiaryColor: "#150a00",
         fontFamily: "inherit",
       },
     });
@@ -31,16 +32,16 @@
 </head>
 <body>
   <header id="topbar">
-    <span id="title">Klimt</span>
+    <span id="title" aria-label="klimt">[|&lt;]</span>
     <span id="model" class="muted"></span>
-    <button id="reset" title="Clear conversation">reset</button>
+    <span id="context" class="muted context"></span>
+    <span id="status" class="muted status" aria-live="polite"></span>
   </header>
 
   <main id="transcript" aria-live="polite"></main>
 
   <footer id="composer">
-    <textarea id="input" rows="3" placeholder="Message. Enter=send, Shift+Enter=newline, !cmd=shell, /name=skill"></textarea>
-    <button id="send">send</button>
+    <textarea id="input" rows="1"></textarea>
   </footer>
 
   <script src="app.js"></script>
