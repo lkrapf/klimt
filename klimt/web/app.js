@@ -243,6 +243,19 @@ function addStartup(info) {
     lines.push("", "_none_");
   }
 
+  lines.push("", "## Commands");
+  const commands = Array.isArray(info.commands) ? info.commands : [];
+  if (commands.length) {
+    lines.push("", "| command | description |", "|---|---|");
+    for (const c of commands) {
+      const usage = escapeMd(c.usage || "");
+      const desc = escapeMd(c.description || "");
+      lines.push("| `" + usage + "` | " + desc + " |");
+    }
+  } else {
+    lines.push("", "type `/help` for commands");
+  }
+
   lines.push("", "## Available tools");
   const tools = Array.isArray(info.available_tools) ? info.available_tools : (Array.isArray(info.tools) ? info.tools : []);
   if (tools.length) {
@@ -256,7 +269,6 @@ function addStartup(info) {
     lines.push("", "_none_");
   }
 
-  lines.push("", "type `/help` for more information");
   addMessage("system", lines.join("\n"));
 }
 

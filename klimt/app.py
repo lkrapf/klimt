@@ -318,6 +318,10 @@ class Api:
             "input_history": self._session.input_history,
             "context": self._session.context_usage(),
             "skills": skills.list_skills(),
+            "commands": [
+                {"usage": usage, "description": description}
+                for usage, description in commands.command_rows()
+            ],
             # Prefer the explicit name. Keep `tools` for compatibility with old JS.
             "available_tools": available_tools,
             "tools": available_tools,

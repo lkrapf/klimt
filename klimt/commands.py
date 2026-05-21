@@ -15,6 +15,7 @@ class CommandSpec:
     usage: str
     description: str
     busy: BusyPolicy = "block"
+    docs: str = ""
 
 
 SPECS: tuple[CommandSpec, ...] = (
@@ -22,13 +23,13 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/help", "/help", "Show this help.", "allow"),
     CommandSpec("/skills", "/skills", "List available skills with short descriptions.", "allow"),
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
-    CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session."),
+    CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),
     CommandSpec("/new", "/new", "Start a completely new empty session."),
     CommandSpec("/sessions", "/sessions [resume|delete|clear] ...", "List, resume, delete, or clear saved sessions for this folder."),
     CommandSpec("/name", "/name [name]", "Show or rename the current session."),
-    CommandSpec("/reload", "/reload", "Reload config, skills, tools, model endpoint, and CSS."),
+    CommandSpec("/reload", "/reload", "Reload `~/.klimt/AGENTS.md`, skills, tools, model endpoint, and CSS."),
     CommandSpec("/quit", "/quit", "Close Klimt."),
-    CommandSpec("/<skill>", "/<skill>", "Load ~/.klimt/skills/<skill>/SKILL.md into the conversation."),
+    CommandSpec("/<skill>", "/<skill>", "Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation."),
 )
 
 
@@ -54,15 +55,27 @@ def classify(text: str) -> CommandSpec | None:
     return next(s for s in SPECS if s.name == "/<skill>")
 
 
+def command_rows() -> list[tuple[str, str]]:
+    return [(spec.usage, spec.description) for spec in SPECS]
+
+
+def command_markdown_table() -> str:
+    lines = ["| command | description |", "|---|---|"]
+    for usage, description in command_rows():
+        lines.append(f"| `{usage}` | {description} |")
+    return "\n".join(lines)
+
+
+def command_bullets() -> str:
+    return "\n".join(f"- `{usage}` — {description}" for usage, description in command_rows())
+
+
 def help_markdown(format_session_help: Callable[[], list[str]] | None = None) -> str:
     lines = [
         "## Commands",
         "",
-        "| command | description |",
-        "|---|---|",
+        command_markdown_table(),
     ]
-    for spec in SPECS:
-        lines.append(f"| `{spec.usage}` | {spec.description} |")
 
     if format_session_help:
         lines.extend(format_session_help())
