@@ -21,6 +21,7 @@ Optional env:
 - `AZURE_OPENAI_API_VERSION` — defaults to `2024-10-21`
 - `KLIMT_MODEL` — override the deployment name used for this session
 - `KLIMT_SYSTEM` — system prompt
+- `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator. If unset, Klimt hides the percentage because Azure does not expose this reliably via the chat API.
 - `KLIMT_DEBUG=1` — enables the webview devtools
 
 ## Streaming showcase
@@ -52,10 +53,19 @@ What to expect:
 - `Shift+Enter` — newline
 - `reset` button — clears server-side conversation history
 
+The top bar shows `working...` while a request is still running and displays approximate context fill as `<percent>/<window>`, e.g. `42.1%/128k`. New sessions start with a unique temporary name and are auto-renamed from the first normal prompt.
+
 ## Input prefixes
 
 - `!cmd` — run a shell command directly and show the result as a tool box.
-- `/name` — load `~/.klimt/skills/<name>/SKILL.md` into the conversation.
+- `/help` — show built-in commands and discovered skills.
+- `/skills` — list available skills with short descriptions.
+- `/compact [N]` — compact older context into structured state, keeping the last N history messages raw (default 8).
+- `/reload` — reload `~/.klimt/AGENTS.md`, skill discovery, `tools.py`, Azure client config, and CSS.
+- `/resume [name]` — resume a saved session for this folder.
+- `/name <name>` — name the current session.
+- `/quit` — close Klimt.
+- `/<skill>` — load `~/.klimt/skills/<skill>/SKILL.md` into the conversation.
 
 ## Architecture
 
@@ -84,6 +94,6 @@ During the call, Python pushes events into the page via
 
 ## Roadmap
 
-- syntax highlighting (highlight.js or shiki)
 - persist conversations to disk
+- automatic context compaction threshold
 - richer multi-turn tool use
