@@ -1,6 +1,6 @@
 """Tool implementations exposed to the model.
 
-Tools: read, write, bash, webfetch, websearch. Each returns a string. Errors are returned
+Tools: read, edit, write, bash, webfetch, websearch. Each returns a string. Errors are returned
 as strings (not raised) so the model can see them and recover.
 """
 from __future__ import annotations
@@ -22,19 +22,50 @@ WEBFETCH_MAX_BYTES = 2_000_000
 WEBSEARCH_MAX_RESULTS = 5
 WEBFETCH_MAX_TEXT_CHARS = 200_000
 WEBFETCH_MAX_LINKS = 40
+READ_MAX_LINES = 2000
+READ_MAX_BYTES = 50_000
 
 SCHEMAS = [
     {
         "type": "function",
         "function": {
             "name": "read",
-            "description": "Read the contents of a file from disk.",
+            "description": "Read a UTF-8 text file from disk, with optional 1-indexed line offset and line limit. Output is capped and includes line numbers plus a continuation hint when truncated.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path to the file."},
+                    "offset": {"type": "integer", "description": "Optional 1-indexed start line. Defaults to 1.", "minimum": 1},
+                    "limit": {"type": "integer", "description": f"Optional maximum number of lines to return. Capped at {READ_MAX_LINES}.", "minimum": 1},
                 },
                 "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit",
+            "description": "Edit a single file using exact text replacement. Every edits[].oldText must match a unique, non-overlapping region of the original file. If two changes affect the same block or nearby lines, merge them into one edit instead of emitting overlapping edits. Do not include large unchanged regions just to connect distant changes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the existing file to edit."},
+                    "edits": {
+                        "type": "array",
+                        "description": "Exact replacements to apply. Each entry is matched against the original file, not incrementally after earlier entries.",
+                        "minItems": 1,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "oldText": {"type": "string", "description": "Exact text for one targeted replacement. It must be unique in the original file and must not overlap with any other edits[].oldText in the same call."},
+                                "newText": {"type": "string", "description": "Replacement text for this edit."},
+                            },
+                            "required": ["oldText", "newText"],
+                        },
+                    },
+                },
+                "required": ["path", "edits"],
             },
         },
     },
@@ -98,8 +129,93 @@ SCHEMAS = [
 ]
 
 
-def _read(path: str) -> str:
-    return Path(path).expanduser().read_text(encoding="utf-8")
+def _read(path: str, offset: int = 1, limit: int | None = None) -> str:
+    p = Path(path).expanduser()
+    raw = p.read_bytes()
+    if b"\x00" in raw[:8192]:
+        return f"error: binary file not shown: {p}"
+
+    text = raw.decode("utf-8")
+    lines = text.splitlines(keepends=True)
+    total = len(lines)
+    if text and not text.endswith(("\n", "\r")):
+        # splitlines(keepends=True) already includes the unterminated final line.
+        pass
+
+    start = max(1, int(offset or 1))
+    requested = READ_MAX_LINES if limit is None else max(1, int(limit))
+    requested = min(requested, READ_MAX_LINES)
+
+    start_index = min(start - 1, total)
+    selected: list[tuple[int, str]] = []
+    used = 0
+    truncated_by_bytes = False
+    for line_no, line in enumerate(lines[start_index:], start=start):
+        if len(selected) >= requested:
+            break
+        encoded_len = len(line.encode("utf-8"))
+        if selected and used + encoded_len > READ_MAX_BYTES:
+            truncated_by_bytes = True
+            break
+        selected.append((line_no, line))
+        used += encoded_len
+
+    end = selected[-1][0] if selected else start - 1
+    body = "".join(f"{line_no:6d}\t{line}" for line_no, line in selected)
+    if body and not body.endswith("\n"):
+        body += "\n"
+
+    out = [f"{p} lines {start}-{end} of {total}", body.rstrip("\n")]
+    more = end < total
+    if more:
+        reasons = []
+        if len(selected) >= requested:
+            reasons.append(f"line limit {requested}")
+        if truncated_by_bytes:
+            reasons.append(f"byte limit {READ_MAX_BYTES}")
+        reason = " / ".join(reasons) or "truncated"
+        out.append(f"[truncated: {reason}; use offset={end + 1} to continue]")
+    return "\n".join(part for part in out if part)
+
+
+def _edit(path: str, edits: list[dict[str, str]]) -> str:
+    if not edits:
+        return "error: edits must not be empty"
+
+    p = Path(path).expanduser()
+    original = p.read_bytes()
+    matches: list[tuple[int, int, bytes, bytes]] = []
+
+    for i, edit in enumerate(edits, start=1):
+        old_text = edit.get("oldText")
+        new_text = edit.get("newText")
+        if not isinstance(old_text, str) or not isinstance(new_text, str):
+            return f"error: edit {i}: oldText and newText must be strings"
+        if old_text == "":
+            return f"error: edit {i}: oldText must not be empty"
+
+        old = old_text.encode("utf-8")
+        new = new_text.encode("utf-8")
+        count = original.count(old)
+        if count == 0:
+            return f"error: edit {i}: oldText not found"
+        if count > 1:
+            return f"error: edit {i}: oldText is not unique ({count} matches)"
+        start = original.index(old)
+        matches.append((start, start + len(old), old, new))
+
+    ordered = sorted(matches, key=lambda item: item[0])
+    for (start, end, _, _), (next_start, _, _, _) in zip(ordered, ordered[1:]):
+        if end > next_start:
+            return "error: edits overlap; merge nearby changes into one edit"
+
+    updated = original
+    for start, end, _old, new in sorted(matches, key=lambda item: item[0], reverse=True):
+        updated = updated[:start] + new + updated[end:]
+
+    p.write_bytes(updated)
+    delta = len(updated) - len(original)
+    return f"edited {p}: {len(edits)} replacement(s), {len(original)} -> {len(updated)} bytes ({delta:+d})"
 
 
 def _write(path: str, content: str) -> str:
@@ -422,7 +538,9 @@ def _bash(command: str, cancel: Event | None = None) -> str:
 def run(name: str, args: Dict[str, Any], cancel: Event | None = None) -> str:
     try:
         if name == "read":
-            return _read(args["path"])
+            return _read(args["path"], args.get("offset", 1), args.get("limit"))
+        if name == "edit":
+            return _edit(args["path"], args["edits"])
         if name == "write":
             return _write(args["path"], args["content"])
         if name == "bash":

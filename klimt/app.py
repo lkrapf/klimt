@@ -1,17 +1,26 @@
 """Application entrypoint: spawns the pywebview window and wires the JS bridge."""
 from __future__ import annotations
 
+import copy
 import importlib
 import json
 import os
+import contextlib
+import threading
+from datetime import datetime
+from html import escape as xml_escape
 from pathlib import Path
+from typing import Any
 
 import webview
 
 from . import __version__, skills, tools
 from .api import ChatSession
+from .model_config import default_model_name, list_model_configs, list_model_names
 
 WEB_DIR = Path(__file__).parent / "web"
+ASSETS_DIR = Path(__file__).parent / "assets"
+ICON_PATH = ASSETS_DIR / "klimt-icon.png"
 SYSTEM_PROMPT_PATH = Path.home() / ".klimt" / "AGENTS.md"
 
 
@@ -23,27 +32,58 @@ def _build_system_prompt() -> str:
         except FileNotFoundError:
             base = ""
 
-    items = skills.list_skills()
-    if not items:
-        return base
     lines = [
         "",
-        "## Available skills",
-        "",
-        "These skills are available on demand. The user invokes one with",
-        "`/<name>`, which loads its full SKILL.md into the conversation.",
-        "If a user's task matches a skill, suggest the invocation.",
+        "## Available tools",
         "",
     ]
-    for s in items:
-        desc = s["description"] or "(no description)"
-        lines.append(f"- `/{s['name']}` — {desc}")
+    for schema in tools.SCHEMAS:
+        fn = schema.get("function", {})
+        name = str(fn.get("name") or "")
+        desc = str(fn.get("description") or "")
+        lines.append(f"- `{name}` — {desc}")
+
+    lines.extend([
+        "",
+        "Guidelines:",
+        "- Use bash for file operations like ls, rg, find.",
+        "- Use read to examine files instead of cat or sed.",
+        "- Use edit for precise changes; edits[].oldText must match exactly, uniquely, and non-overlappingly.",
+        "- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls.",
+        "- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
+        "- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
+        "- Use write only for new files or complete rewrites.",
+        "",
+    ])
+
+    items = skills.list_skills()
+    if items:
+        lines.extend([
+            "The following skills provide specialized instructions for specific tasks.",
+            "Use the read tool to load a skill's file when the task matches its description.",
+            "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
+            "",
+            "<available_skills>",
+        ])
+        for s in items:
+            name = xml_escape(str(s.get("name") or ""))
+            desc = xml_escape(str(s.get("description") or "(no description)"))
+            location = xml_escape(str(Path(s.get("path") or "").expanduser().resolve()))
+            lines.extend([
+                "  <skill>",
+                f"    <name>{name}</name>",
+                f"    <description>{desc}</description>",
+                f"    <location>{location}</location>",
+                "  </skill>",
+            ])
+        lines.append("</available_skills>")
+
     return base + "\n".join(lines) + "\n"
 
 
 def _new_session() -> ChatSession:
     return ChatSession(
-        model=os.environ.get("KLIMT_MODEL", os.environ["AZURE_OPENAI_DEPLOYMENT"]),
+        model=default_model_name(),
         system=_build_system_prompt(),
         context_window=int(os.environ.get("KLIMT_CONTEXT_WINDOW", "128000")),
     )
@@ -55,6 +95,11 @@ class Api:
     def __init__(self, session: ChatSession) -> None:
         self._session = session
         self._window = None  # set by attach_window
+        self._session_choices: list[dict[str, Any]] = []
+        self._busy = False
+        self._busy_lock = threading.Lock()
+        self._generation = 0
+        self._active_base: int | None = None
 
     def attach_window(self, window) -> None:
         self._window = window
@@ -63,9 +108,15 @@ class Api:
         payload = json.dumps(event)
         self._window.evaluate_js(f"window.klimt.handleEvent({payload})")
 
+    def _emit_current(self, generation: int, event: dict) -> None:
+        with self._busy_lock:
+            if generation != self._generation:
+                return
+        self._emit(event)
+
     def _sync_input_history(self) -> None:
         self._emit({"type": "input_history", "items": self._session.input_history})
-        self._emit({"type": "session", "name": self._session.session_name})
+        self._emit({"type": "session", "name": self._session.session_name, "model": self._session.model})
         self._emit({"type": "context", **self._session.context_usage()})
 
     def _replay_session(self) -> None:
@@ -99,11 +150,18 @@ class Api:
                     "result": msg.get("content") or "",
                 })
 
+    def _done(self) -> None:
+        self._emit({"type": "done"})
+
     def send(self, text: str) -> dict:
+        background = False
         try:
             command = text.strip()
-            if command == "/resume" or command.startswith("/resume "):
-                self._resume(command[7:].strip())
+            if command == "/new":
+                self._new()
+                return {"ok": True}
+            if command == "/sessions" or command.startswith("/sessions "):
+                self._sessions(command[9:].strip())
                 return {"ok": True}
 
             renamed = self._session.maybe_title_from_first_input(command)
@@ -130,8 +188,21 @@ class Api:
             if command == "/name" or command.startswith("/name "):
                 self._name(command[5:].strip())
                 return {"ok": True}
-            self._session.stream(text, self._emit)
-            self._sync_input_history()
+            if command == "/model" or command.startswith("/model "):
+                self._model(command[6:].strip())
+                return {"ok": True}
+            with self._busy_lock:
+                if self._busy:
+                    self._emit({"type": "error", "message": "session is still busy; press Esc to interrupt"})
+                    return {"ok": False, "error": "session busy"}
+                self._busy = True
+                self._generation += 1
+                generation = self._generation
+                session = self._session
+                self._active_base = len(session.history)
+
+            background = True
+            threading.Thread(target=self._stream_worker, args=(session, text, generation), daemon=True).start()
             return {"ok": True}
         except Exception as e:  # noqa: BLE001
             msg = f"{type(e).__name__}: {e}"
@@ -140,10 +211,70 @@ class Api:
             except Exception:
                 pass
             return {"ok": False, "error": msg}
+        finally:
+            if not background:
+                with contextlib.suppress(Exception):
+                    self._done()
+
+    def _stream_worker(self, session: ChatSession, text: str, generation: int) -> None:
+        emit = lambda event: self._emit_current(generation, event)
+        try:
+            session.stream(text, emit)
+            if generation == self._generation:
+                self._sync_input_history()
+        except Exception as e:  # noqa: BLE001
+            emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
+        finally:
+            finish = False
+            with self._busy_lock:
+                if generation == self._generation:
+                    self._busy = False
+                    self._active_base = None
+                    finish = True
+            if finish:
+                self._done()
 
     def reset(self) -> dict:
         self._session.reset()
         self._sync_input_history()
+        return {"ok": True}
+
+    def interrupt(self) -> dict:
+        with self._busy_lock:
+            was_busy = self._busy
+            old_session = self._session
+            base = self._active_base
+            if was_busy:
+                # Invalidate the active worker immediately so any late events are
+                # ignored, but keep _busy true until the replacement session is
+                # installed. Otherwise a fast next send can race onto the old
+                # ChatSession.
+                self._generation += 1
+
+        if not was_busy:
+            old_session.interrupt()
+            return {"ok": True}
+
+        # Python cannot safely kill a worker thread. Instead, cancel the old
+        # request, abandon that ChatSession so late persistence is ignored, and
+        # swap in a clean copy of the pre-turn session immediately.
+        old_session.abandon()
+        restored = _new_session()
+        restored.model = old_session.model
+        restored.reload_client()
+        restored.session_name = old_session.session_name
+        restored.input_history = list(old_session.input_history)
+        restored.history = copy.deepcopy(old_session.history[:base]) if base is not None else []
+        restored.persist()
+
+        with self._busy_lock:
+            self._session = restored
+            self._session_choices = []
+            self._busy = False
+            self._active_base = None
+
+        self._sync_input_history()
+        self._done()
         return {"ok": True}
 
     def info(self) -> dict:
@@ -157,6 +288,7 @@ class Api:
         return {
             "version": __version__,
             "model": self._session.model,
+            "models": list_model_names(),
             "session": self._session.session_name,
             "input_history": self._session.input_history,
             "context": self._session.context_usage(),
@@ -170,28 +302,36 @@ class Api:
         lines = [
             "## Commands",
             "",
-            "- `!cmd` — run a shell command directly and show the result as a tool box.",
-            "- `/help` — show this help.",
-            "- `/skills` — list available skills with short descriptions.",
-            "- `/compact [N]` — compact older context, keeping the last N history messages raw (default 8).",
-            "- `/reload` — reload `~/.klimt/AGENTS.md`, skills, tools, Azure client config, and CSS.",
-            "- `/quit` — close Klimt.",
-            "- `/resume [name]` — resume a saved session for this folder; without a name resumes the most recent.",
-            "- `/name <name>` — name the current session.",
-            "- `/<skill>` — load `~/.klimt/skills/<skill>/SKILL.md` into the conversation.",
+            "| command | description |",
+            "|---|---|",
+            "| `!<cmd>` | Run a shell command directly and show the result as a tool box. |",
+            "| `/help` | Show this help. |",
+            "| `/skills` | List available skills with short descriptions. |",
+            "| `/compact [N]` | Compact older context, keeping the last N history messages raw. Default: 8. |",
+            "| `/model [name]` | Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`. |",
+            "| `/reload` | Reload `~/.klimt/AGENTS.md`, skills, tools, Azure client config, and CSS. |",
+            "| `/new` | Start a completely new empty session. |",
+            "| `/sessions` | List, resume, delete, or clear saved sessions for this folder. |",
+            "| `/name [name]` | Without an argument, show the current session name. With a name, rename the current session. |",
+            "| `/<skill>` | Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation. |",
+            "| `/quit` | Close Klimt. |",
+            "",
+            "## `/sessions`",
+            "",
+            "`/sessions` lists saved sessions for this folder. Below the list it shows these subcommands:",
+            "",
+            "- `/sessions resume <number|name>` — resume a session from the latest list, or by name.",
+            "- `/sessions delete <number|name>` — delete a saved session. Deleting the active session starts a new one.",
+            "- `/sessions clear confirm` — delete all saved sessions for this folder and start a new one.",
             "",
             "## Keys",
             "",
-            "- `Enter` — send",
-            "- `Shift+Enter` — newline",
+            "| key | action |",
+            "|---|---|",
+            "| `Enter` | Send. |",
+            "| `Shift+Enter` | Insert newline. |",
+            "| `Esc` | Interrupt current work. |",
         ]
-
-        items = skills.list_skills()
-        if items:
-            lines.extend(["", "## Available skills", ""])
-            for s in items:
-                desc = s["description"] or "(no description)"
-                lines.append(f"- `/{s['name']}` — {desc}")
 
         self._emit({"type": "text", "content": "\n".join(lines)})
 
@@ -201,11 +341,20 @@ class Api:
             self._emit({"type": "text", "content": "_no skills found under `~/.klimt/skills`_"})
             return
 
-        lines = ["## Available skills", ""]
+        self._emit({"type": "text", "content": self._format_skills_table(items)})
+
+    def _format_skills_table(self, items: list[dict[str, Any]]) -> str:
+        lines = [
+            "## Available skills",
+            "",
+            "| skill | description |",
+            "|---|---|",
+        ]
         for s in items:
-            desc = s["description"] or "(no description)"
-            lines.append(f"- `/{s['name']}` — {desc}")
-        self._emit({"type": "text", "content": "\n".join(lines)})
+            name = self._md_escape(s.get("name") or "")
+            desc = self._md_escape(s.get("description") or "(no description)")
+            lines.append(f"| `/{name}` | {desc} |")
+        return "\n".join(lines)
 
     def _compact(self, arg: str) -> None:
         keep_recent = 8
@@ -221,21 +370,144 @@ class Api:
         self._sync_input_history()
         self._emit({"type": "text", "content": result})
 
-    def _resume(self, name: str) -> None:
-        if not name:
-            sessions = self._session.list_sessions()
-            if not sessions:
-                self._emit({"type": "text", "content": "_no saved sessions for this folder_"})
-                return
-            name = sessions[0]["name"]
+    @staticmethod
+    def _md_escape(text: object) -> str:
+        return str(text or "").replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|")
 
-        if not self._session.load_session(name):
-            self._emit({"type": "text", "content": f"_unknown session: `{name}`_"})
+    @staticmethod
+    def _format_session_time(ts: object) -> str:
+        try:
+            value = float(ts or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if value <= 0:
+            return "unknown"
+        return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
+
+    def _list_sessions(self) -> None:
+        sessions = self._session.list_sessions()
+        self._session_choices = sessions
+        if not sessions:
+            self._emit({"type": "text", "content": "_no saved sessions for this folder_"})
             return
 
+        lines = [
+            "## Sessions",
+            "",
+            "| # | name | model | updated | messages | inputs |",
+            "|---:|---|---|---:|---:|---:|",
+        ]
+        for i, s in enumerate(sessions, start=1):
+            name = self._md_escape(s.get("name") or "")
+            model = self._md_escape(s.get("model") or "")
+            updated = self._format_session_time(s.get("updated"))
+            messages = int(s.get("messages") or 0)
+            inputs = int(s.get("inputs") or 0)
+            lines.append(f"| {i} | `{name}` | `{model}` | {updated} | {messages} | {inputs} |")
+        lines.extend([
+            "",
+            "Commands:",
+            "",
+            "- `/sessions resume <number|name>` — resume a session from this list, or by name.",
+            "- `/sessions delete <number|name>` — delete a saved session. Deleting the active session starts a new one.",
+            "- `/sessions clear confirm` — delete all saved sessions for this folder and start a new one.",
+        ])
+        self._emit({"type": "text", "content": "\n".join(lines)})
+
+    def _resolve_session_name(self, arg: str) -> str:
+        """Resolve a session name or index from the latest `/sessions` list."""
+        name = arg.strip()
+        if not name:
+            return ""
+        if not name.isdecimal():
+            return name
+
+        index = int(name)
+        if index <= 0:
+            return name
+
+        if not self._session_choices:
+            self._session_choices = self._session.list_sessions()
+
+        if 1 <= index <= len(self._session_choices):
+            return str(self._session_choices[index - 1].get("name") or "")
+
+        return name
+
+    def _new(self) -> None:
+        self._session.interrupt()
+        self._session = _new_session()
+        self._session_choices = []
+        self._emit({"type": "clear"})
+        self._sync_input_history()
+        self._emit({"type": "text", "content": f"new session **{self._md_escape(self._session.session_name)}**"})
+
+    def _sessions(self, arg: str) -> None:
+        if not arg:
+            self._list_sessions()
+            return
+
+        cmd, _, rest = arg.partition(" ")
+        if cmd == "resume" and rest.strip():
+            self._resume_session(rest.strip())
+            return
+        if cmd == "delete" and rest.strip():
+            self._delete_session(rest.strip())
+            return
+        if cmd == "clear" and rest.strip() == "confirm":
+            self._clear_sessions()
+            return
+
+        self._emit({"type": "text", "content": "_usage: `/sessions`, `/sessions resume <number|name>`, `/sessions delete <number|name>`, or `/sessions clear confirm`_"})
+
+    def _delete_session(self, target: str) -> None:
+        name = self._resolve_session_name(target)
+        if not self._session.store.exists(name):
+            self._emit({"type": "text", "content": f"_unknown session: `{self._md_escape(target)}`_"})
+            return
+
+        active = name == self._session.session_name
+        self._session.store.delete(name)
+        self._session_choices = []
+        if active:
+            self._new()
+            self._emit({"type": "text", "content": f"deleted active session **{self._md_escape(name)}**"})
+            return
+
+        self._emit({"type": "text", "content": f"deleted session **{self._md_escape(name)}**"})
+        self._list_sessions()
+
+    def _clear_sessions(self) -> None:
+        self._session.interrupt()
+        self._session.store.clear()
+        self._session = _new_session()
+        self._session_choices = []
+        self._emit({"type": "clear"})
+        self._sync_input_history()
+        self._emit({"type": "text", "content": "deleted all sessions for this folder"})
+        self._emit({"type": "text", "content": f"new session **{self._md_escape(self._session.session_name)}**"})
+
+    def _resume_session(self, name: str) -> None:
+        if not name:
+            self._emit({"type": "text", "content": "_usage: `/sessions resume <number|name>`_"})
+            return
+
+        requested = name.strip()
+        resolved = self._resolve_session_name(requested)
+        if not self._session.load_session(resolved):
+            hint = ""
+            if requested.isdecimal():
+                hint = "\n\nRun `/sessions` to refresh the numbered list."
+            self._emit({
+                "type": "text",
+                "content": f"_unknown session: `{self._md_escape(requested)}`_{hint}",
+            })
+            return
+
+        self._session_choices = []
         self._replay_session()
         self._sync_input_history()
-        self._emit({"type": "text", "content": f"resumed session **{self._session.session_name}**"})
+        self._emit({"type": "text", "content": f"resumed session **{self._md_escape(self._session.session_name)}**"})
 
     def _name(self, name: str) -> None:
         if not name:
@@ -246,26 +518,105 @@ class Api:
         self._sync_input_history()
         self._emit({"type": "text", "content": f"session named **{self._session.session_name}**"})
 
+    def _model(self, model: str) -> None:
+        configs = list_model_configs()
+        choices = [cfg.name for cfg in configs]
+        if not model:
+            lines = [
+                f"current model: **{self._md_escape(self._session.model)}**",
+                "",
+                "## Configured models",
+                "",
+            ]
+            if choices:
+                lines.extend([
+                    "| current | name | provider | model/deployment | endpoint | API version |",
+                    "|---|---|---|---|---|---|",
+                ])
+                for cfg in configs:
+                    current = "yes" if cfg.name == self._session.model else ""
+                    endpoint = cfg.base_url or ""
+                    api_version = cfg.api_version or ""
+                    lines.append(
+                        "| "
+                        + " | ".join([
+                            current,
+                            f"`{self._md_escape(cfg.name)}`",
+                            self._md_escape(cfg.provider),
+                            f"`{self._md_escape(cfg.provider_model())}`",
+                            self._md_escape(endpoint),
+                            self._md_escape(api_version),
+                        ])
+                        + " |"
+                    )
+            else:
+                lines.append("_none configured_")
+            lines.extend([
+                "",
+                "Usage: `/model <name>`",
+                "",
+                "Create `~/.klimt/models.json` to define selectable Azure, Ollama, OpenAI-compatible, or Anthropic endpoints.",
+            ])
+            self._emit({"type": "text", "content": "\n".join(lines)})
+            return
+
+        requested = model.strip()
+        if requested not in choices:
+            self._emit({
+                "type": "text",
+                "content": (
+                    f"_unknown model: `{self._md_escape(requested)}`_\n\n"
+                    "Configured choices: "
+                    + (", ".join(f"`{self._md_escape(x)}`" for x in choices) if choices else "_none; create `~/.klimt/models.json`_")
+                ),
+            })
+            return
+
+        self._session.interrupt()
+        self._session.model = requested
+        self._session.reload_client()
+        self._session.persist()
+        self._sync_input_history()
+        self._emit({"type": "text", "content": f"model set to **{self._md_escape(requested)}**"})
+
     def _reload(self) -> None:
         """Reload local config, skill/tool modules, model config, and CSS."""
         importlib.reload(skills)
         importlib.reload(tools)
         self._session.system = _build_system_prompt()
-        self._session.model = os.environ.get(
-            "KLIMT_MODEL",
-            os.environ["AZURE_OPENAI_DEPLOYMENT"],
-        )
         self._session.context_window = int(os.environ.get("KLIMT_CONTEXT_WINDOW", "128000"))
         self._session.reload_client()
         self._emit({"type": "reload_css"})
-        self._emit({"type": "text", "content": "reloaded config, skills, tools, and CSS"})
+        self._sync_input_history()
+        self._emit({"type": "text", "content": "reloaded config, skills, tools, model endpoint, and CSS"})
 
     def _quit(self) -> None:
         """Exit the process immediately."""
         os._exit(0)
 
 
+def _set_macos_icon() -> None:
+    """Set the runtime Dock/app-switcher icon when launched with `python -m`.
+
+    A real `.app` bundle still needs `CFBundleIconFile`/`.icns` in its
+    Info.plist. For an unbundled Python process, macOS lets us override the
+    icon for the running NSApplication, which is good enough for `python -m`.
+    """
+    if os.uname().sysname != "Darwin" or not ICON_PATH.exists():
+        return
+
+    try:
+        from AppKit import NSApplication, NSImage
+    except Exception:
+        return
+
+    image = NSImage.alloc().initWithContentsOfFile_(str(ICON_PATH))
+    if image:
+        NSApplication.sharedApplication().setApplicationIconImage_(image)
+
+
 def main() -> None:
+    _set_macos_icon()
     api = Api(_new_session())
 
     window = webview.create_window(

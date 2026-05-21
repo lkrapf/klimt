@@ -16,10 +16,56 @@ export AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
 python3 -m klimt
 ```
 
+## Model list
+
+`/model` reads selectable endpoint configs from `~/.klimt/models.json`. A plain
+string is treated as a legacy Azure OpenAI deployment name:
+
+```json
+["gpt-4.1", "o3"]
+```
+
+For multiple endpoint types, use objects. `name` is what you type after
+`/model`; `model` or `deployment` is what gets sent to the provider. Keep API
+keys in environment variables via `api_key_env`; putting secrets directly in
+JSON works but is a bad habit.
+
+```json
+{
+  "models": [
+    {
+      "name": "azure-4.1",
+      "provider": "azure",
+      "deployment": "gpt-4.1",
+      "base_url": "https://your-resource.openai.azure.com",
+      "api_version": "2024-10-21",
+      "api_key_env": "AZURE_OPENAI_API_KEY"
+    },
+    {
+      "name": "local-llama",
+      "provider": "ollama",
+      "model": "llama3.1",
+      "base_url": "http://127.0.0.1:11434/v1"
+    },
+    {
+      "name": "claude",
+      "provider": "anthropic",
+      "model": "claude-sonnet-4-6",
+      "api_key_env": "ANTHROPIC_API_KEY"
+    }
+  ]
+}
+```
+
+Supported `provider` values are `azure`, `ollama`, `openai`, and `anthropic`.
+`openai` is also useful for OpenAI-compatible gateways: set `base_url` and
+`api_key_env`. Anthropic is currently wired through its OpenAI SDK
+compatibility layer, so native-only Anthropic features are not exposed.
+
 Optional env:
 
 - `AZURE_OPENAI_API_VERSION` — defaults to `2024-10-21`
-- `KLIMT_MODEL` — override the deployment name used for this session
+- `KLIMT_MODEL` — override the default deployment name used for new sessions
 - `KLIMT_SYSTEM` — system prompt
 - `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator. If unset, Klimt hides the percentage because Azure does not expose this reliably via the chat API.
 - `KLIMT_DEBUG=1` — enables the webview devtools
@@ -61,6 +107,7 @@ The top bar shows `working...` while a request is still running and displays app
 - `/help` — show built-in commands and discovered skills.
 - `/skills` — list available skills with short descriptions.
 - `/compact [N]` — compact older context into structured state, keeping the last N history messages raw (default 8).
+- `/model [name]` — show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`.
 - `/reload` — reload `~/.klimt/AGENTS.md`, skill discovery, `tools.py`, Azure client config, and CSS.
 - `/resume [name]` — resume a saved session for this folder.
 - `/name <name>` — name the current session.

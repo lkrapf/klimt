@@ -8,9 +8,12 @@ const contextLabel = document.getElementById("context");
 
 marked.setOptions({ gfm: true, breaks: false });
 
-const SANITIZE_OPTS = { ADD_TAGS: ["foreignObject"], ADD_ATTR: ["target"] };
+const SANITIZE_OPTS = {
+  ADD_TAGS: ["foreignObject"],
+  ADD_ATTR: ["target"],
+};
 
-const klimt = { pending: null, current: null };
+const klimt = { pending: null, current: null, suppressUntilDone: false };
 window.klimt = klimt;
 
 let inputHistory = [];
@@ -59,6 +62,43 @@ function autoCloseFences(s) {
   return fences % 2 ? s + "\n```" : s;
 }
 
+function hasOpenFence(s) {
+  return ((s.match(/^```/gm) || []).length % 2) !== 0;
+}
+
+function countClosedMermaidBlocks(s) {
+  return (s.match(/(^|\n)```mermaid[\s\S]*?\n```/gi) || []).length;
+}
+
+function countUnescaped(s, token) {
+  let count = 0;
+  let pos = 0;
+  while (true) {
+    const i = s.indexOf(token, pos);
+    if (i < 0) return count;
+    let slashes = 0;
+    for (let j = i - 1; j >= 0 && s[j] === "\\"; j--) slashes += 1;
+    if (slashes % 2 === 0) count += 1;
+    pos = i + token.length;
+  }
+}
+
+function mathBlockCount(s) {
+  const displayDollars = Math.floor(countUnescaped(s, "$$") / 2);
+  const bracketBlocks = (s.match(/\\\[[\s\S]*?\\\]/g) || []).length;
+  const parenBlocks = (s.match(/\\\([\s\S]*?\\\)/g) || []).length;
+  return displayDollars + bracketBlocks + parenBlocks;
+}
+
+function streamEnhanceKey(raw) {
+  const math = mathBlockCount(raw);
+  const mermaid = hasOpenFence(raw) ? 0 : countClosedMermaidBlocks(raw);
+  const parts = [];
+  if (math) parts.push(`math:${math}`);
+  if (mermaid) parts.push(`mermaid:${mermaid}`);
+  return parts.join("+");
+}
+
 let mermaidCounter = 0;
 
 
@@ -88,10 +128,40 @@ function renderMath(root, renderMathInElement) {
       { left: "\\(", right: "\\)", display: false },
     ],
     throwOnError: false,
+    ignoredTags: ["script", "noscript", "style", "textarea", "pre", "code"],
+    processEscapes: true,
   });
 }
 
 async function enhance(root) {
+  // Make broken/blocked images visible instead of failing as empty space.
+  // Set this before the node is appended where possible, so WebKit sends less
+  // identifying referrer data to hosts that dislike hotlinking.
+  root.querySelectorAll("img").forEach((img) => {
+    img.referrerPolicy = "no-referrer";
+    img.loading = "lazy";
+    img.decoding = "async";
+    img.addEventListener("error", () => {
+      const url = img.getAttribute("src") || "";
+      const a = document.createElement("a");
+      a.href = url;
+      a.textContent = `image failed to load: ${url}`;
+      a.target = "_blank";
+      a.rel = "noreferrer";
+      img.replaceWith(a);
+    }, { once: true });
+  });
+
+  // 0. Render TeX before other async work. If the CDN is slow, wait briefly;
+  // otherwise plain TeX remains visible instead of blocking the message.
+  const renderMathInElement = await waitForGlobal("renderMathInElement");
+  if (renderMathInElement) {
+    try { renderMath(root, renderMathInElement); }
+    catch (e) { console.warn("KaTeX render failed", e); }
+  } else if ((root.textContent || "").includes("$")) {
+    console.warn("KaTeX render skipped: window.renderMathInElement was not loaded");
+  }
+
   // 1. Syntax-highlight normal fenced code blocks. Mermaid is handled below.
   if (window.hljs) {
     root.querySelectorAll("pre > code:not(.language-mermaid)").forEach((code) => {
@@ -122,13 +192,6 @@ async function enhance(root) {
     }
   }
 
-  const renderMathInElement = await waitForGlobal("renderMathInElement");
-  if (renderMathInElement) {
-    try { renderMath(root, renderMathInElement); }
-    catch (e) { console.warn("KaTeX render failed", e); }
-  } else if ((root.textContent || "").includes("$")) {
-    console.warn("KaTeX render skipped: window.renderMathInElement was not loaded");
-  }
 }
 
 function reloadCss() {
@@ -147,7 +210,7 @@ function scrollToBottom() {
 
 
 function escapeMd(text) {
-  return String(text ?? "").replace(/[\\`*_{}\[\]()#+\-.!|>]/g, "\\$&");
+  return String(text ?? "").replace(/[\\`*_{}\[\]()#+.!|>]/g, "\\$&");
 }
 
 function addBannerLogo() {
@@ -170,30 +233,33 @@ function addStartup(info) {
 
   const skills = Array.isArray(info.skills) ? info.skills : [];
   if (skills.length) {
+    lines.push("", "| skill | description |", "|---|---|");
     for (const s of skills) {
       const name = escapeMd(s.name || "unnamed");
-      const desc = s.description ? ` — ${escapeMd(s.description)}` : "";
-      lines.push(`- \`/${name}\`${desc}`);
+      const desc = escapeMd(s.description || "(no description)");
+      lines.push("| `/" + name + "` | " + desc + " |");
     }
   } else {
-    lines.push("- none");
+    lines.push("", "_none_");
   }
 
   lines.push("", "## Available tools");
   const tools = Array.isArray(info.available_tools) ? info.available_tools : (Array.isArray(info.tools) ? info.tools : []);
   if (tools.length) {
+    lines.push("", "| tool | description |", "|---|---|");
     for (const t of tools) {
       const name = escapeMd(t.name || "unnamed");
-      const desc = t.description ? ` — ${escapeMd(t.description)}` : "";
-      lines.push(`- \`${name}\`${desc}`);
+      const desc = escapeMd(t.description || "(no description)");
+      lines.push("| `" + name + "` | " + desc + " |");
     }
   } else {
-    lines.push("- none");
+    lines.push("", "_none_");
   }
 
   lines.push("", "type `/help` for more information");
   addMessage("system", lines.join("\n"));
 }
+
 
 // ---- message constructors ------------------------------------------------
 
@@ -296,7 +362,37 @@ function startStreaming() {
   div.appendChild(body);
   transcript.appendChild(div);
   scrollToBottom();
-  return { div, body, raw: "", pending: false, raf: null, done: false };
+  return {
+    div,
+    body,
+    raw: "",
+    pending: false,
+    raf: null,
+    done: false,
+    enhanceTimer: null,
+    enhancedKey: "",
+    renderSerial: 0,
+    enhancedSerial: 0,
+  };
+}
+
+function scheduleStreamEnhance(h) {
+  const key = streamEnhanceKey(h.raw);
+  if (!key) return;
+  if (key === h.enhancedKey && h.enhancedSerial === h.renderSerial) return;
+
+  if (h.enhanceTimer !== null) clearTimeout(h.enhanceTimer);
+  h.enhanceTimer = setTimeout(() => {
+    h.enhanceTimer = null;
+    if (h.done) return;
+
+    // The next token re-renders from raw markdown, so enhancement is intentionally
+    // opportunistic and repeatable. This keeps completed math/mermaid visible
+    // during streaming without trying to mutate partial syntax in place.
+    enhance(h.body);
+    h.enhancedKey = key;
+    h.enhancedSerial = h.renderSerial;
+  }, 120);
 }
 
 function appendDelta(h, txt) {
@@ -308,11 +404,12 @@ function appendDelta(h, txt) {
     h.raf = null;
     h.pending = false;
     if (h.done) return;
-    // Lightweight render: markdown only, no mermaid/KaTeX (run at finalize).
     h.body.innerHTML = DOMPurify.sanitize(
       marked.parse(autoCloseFences(h.raw)),
       SANITIZE_OPTS,
     );
+    h.renderSerial += 1;
+    scheduleStreamEnhance(h);
     scrollToBottom();
   });
 }
@@ -324,6 +421,10 @@ function finalizeStreaming(h) {
     cancelAnimationFrame(h.raf);
     h.raf = null;
   }
+  if (h.enhanceTimer !== null) {
+    clearTimeout(h.enhanceTimer);
+    h.enhanceTimer = null;
+  }
   h.body.innerHTML = renderMarkdown(h.raw);
   enhance(h.body);
   h.div.classList.remove("streaming");
@@ -333,6 +434,7 @@ function finalizeStreaming(h) {
 // ---- bridge event handler (called from Python via evaluate_js) ----------
 
 klimt.handleEvent = function(ev) {
+  if (klimt.suppressUntilDone && ev.type !== "done") return;
   if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
 
   switch (ev.type) {
@@ -366,6 +468,7 @@ klimt.handleEvent = function(ev) {
       setInputHistory(ev.items);
       break;
     case "session":
+      if (ev.model !== undefined) modelLabel.dataset.model = ev.model || "";
       modelLabel.textContent = [modelLabel.dataset.model, ev.name].filter(Boolean).join(" · ");
       break;
     case "context":
@@ -385,15 +488,30 @@ klimt.handleEvent = function(ev) {
     case "reload_css":
       reloadCss();
       break;
+    case "done":
+      klimt.suppressUntilDone = false;
+      finishWork();
+      break;
   }
 };
 
 // ---- input wiring --------------------------------------------------------
 
 function setWorking(on) {
-  document.body.classList.toggle("working", on);
-  document.body.setAttribute("aria-busy", on ? "true" : "false");
-  statusLabel.textContent = on ? "working..." : "";
+  working = Boolean(on);
+  document.body.classList.toggle("working", working);
+  document.body.setAttribute("aria-busy", working ? "true" : "false");
+  statusLabel.textContent = working ? "working..." : "";
+}
+
+function finishWork() {
+  if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
+  if (klimt.current) {
+    finalizeStreaming(klimt.current);
+    klimt.current = null;
+  }
+  setWorking(false);
+  input.focus();
 }
 
 function resizeInput() {
@@ -440,9 +558,25 @@ function navigateHistory(delta) {
 }
 
 
+let working = false;
+
+function interruptWork() {
+  if (!working) return;
+
+  // Do not await the bridge. On some pywebview backends API calls are serialized
+  // behind the active send call; waiting here is exactly what makes Esc feel dead.
+  klimt.suppressUntilDone = true;
+  finishWork();
+  addMessage("system", "_interrupted_");
+
+  window.pywebview.api.interrupt().catch((e) => {
+    addMessage("error", "**Bridge error:** " + (e?.message || e));
+  });
+}
+
 async function send() {
   const text = input.value.trim();
-  if (!text) return;
+  if (!text || working) return;
 
   rememberInput(text);
   setInputValue("");
@@ -452,17 +586,13 @@ async function send() {
 
   try {
     const res = await window.pywebview.api.send(text);
-    if (!res.ok) addMessage("error", "**Error:** " + res.error);
+    if (!res.ok) {
+      addMessage("error", "**Error:** " + res.error);
+      finishWork();
+    }
   } catch (e) {
     addMessage("error", "**Bridge error:** " + (e?.message || e));
-  } finally {
-    if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
-    if (klimt.current) {
-      finalizeStreaming(klimt.current);
-      klimt.current = null;
-    }
-    setWorking(false);
-    input.focus();
+    finishWork();
   }
 }
 
@@ -493,15 +623,24 @@ input.addEventListener("keydown", (e) => {
   }
 });
 
-// Global: Ctrl+J / Ctrl+K scroll the transcript, even while typing.
+// Global: Esc interrupts current work; Ctrl+J / Ctrl+K scroll the transcript, even while typing.
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+    if (working) {
+      e.preventDefault();
+      e.stopPropagation();
+      interruptWork();
+    }
+    return;
+  }
+
   if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
   if (e.key === "j" || e.key === "k") {
     e.preventDefault();
     const step = 60;
     transcript.scrollTop += e.key === "j" ? step : -step;
   }
-});
+}, true);
 
 window.addEventListener("pywebviewready", async () => {
   try {

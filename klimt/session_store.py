@@ -8,6 +8,7 @@ import os
 import time
 import secrets
 import re
+import shutil
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -74,11 +75,15 @@ class SessionStore:
         with contextlib.suppress(FileNotFoundError):
             self._path(name).unlink()
 
+    def clear(self) -> None:
+        shutil.rmtree(self.root, ignore_errors=True)
+
     def save(
         self,
         name: str,
         history: List[Dict[str, Any]],
         input_history: List[str],
+        model: str | None = None,
     ) -> None:
         name = (name or DEFAULT_SESSION).strip() or DEFAULT_SESSION
         self.root.mkdir(parents=True, exist_ok=True)
@@ -88,6 +93,7 @@ class SessionStore:
             "updated": time.time(),
             "history": history,
             "input_history": input_history,
+            "model": model,
         }
         tmp = self._path(name).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -120,6 +126,7 @@ class SessionStore:
                 "updated": float(data.get("updated") or 0),
                 "messages": len(data.get("history") or []),
                 "inputs": len(data.get("input_history") or []),
+                "model": data.get("model") or "",
             })
         out.sort(key=lambda x: x["updated"], reverse=True)
         return out
