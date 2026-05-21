@@ -15,7 +15,9 @@ export function escapeMd(text) {
 }
 
 function codeSpan(text) {
-  return "`" + String(text ?? "") + "`";
+  // In Markdown tables, `|` still separates cells even inside code spans.
+  // Escape only the table delimiter; leave normal Markdown syntax readable.
+  return "`" + String(text ?? "").replace(/\|/g, "\\|") + "`";
 }
 
 export function addBannerLogo() {
