@@ -7,16 +7,13 @@ import os
 import threading
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List
+from typing import Any, Dict, List
 
-from . import tools
+from .api_types import Emit
 from .model_config import ModelConfig, resolve_model_config
 from .providers import ChatProvider
+from .runner import run_turn
 from .session_store import DEFAULT_SESSION, UNTITLED_PREFIX, SessionStore, random_session_name, title_from_prompt
-
-Event = Dict[str, Any]
-Emit = Callable[[Event], None]
-
 
 COMPACTION_PROMPT = """You compact old chat history into durable working state.
 
@@ -78,19 +75,6 @@ def _chunk_messages(messages: List[Dict[str, Any]], max_tokens: int) -> List[Lis
     if current:
         chunks.append(current)
     return chunks
-
-
-def _usage_dict(usage: Any) -> Dict[str, int]:
-    """Normalize OpenAI usage into the small shape we persist."""
-    details = getattr(usage, "prompt_tokens_details", None)
-    cached = getattr(details, "cached_tokens", 0) if details else 0
-    return {
-        "input": int(getattr(usage, "prompt_tokens", 0) or 0),
-        "output": int(getattr(usage, "completion_tokens", 0) or 0),
-        "cacheRead": int(cached or 0),
-        "cacheWrite": 0,
-        "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
-    }
 
 
 def _context_tokens_from_usage(usage: Dict[str, Any]) -> int:
@@ -164,7 +148,7 @@ class ChatSession:
     store: SessionStore = field(default_factory=SessionStore, repr=False)
     _provider: ChatProvider = field(default=None, init=False, repr=False)
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
-    _active_stream: Any = field(default=None, init=False, repr=False)
+    _active_stream_ref: Dict[str, Any] = field(default_factory=lambda: {"stream": None}, init=False, repr=False)
     _active_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
     _abandoned: bool = field(default=False, init=False, repr=False)
 
@@ -181,7 +165,7 @@ class ChatSession:
         """Ask the current request/tool to stop as soon as possible."""
         self._cancel.set()
         with self._active_lock:
-            stream = self._active_stream
+            stream = self._active_stream_ref.get("stream")
         close = getattr(stream, "close", None)
         if close:
             with contextlib.suppress(Exception):
@@ -351,119 +335,15 @@ class ChatSession:
         """
         self._cancel.clear()
         self.history.append({"role": "user", "content": user_text})
-
-        while True:
-            if self._cancel.is_set():
-                emit({"type": "error", "message": "interrupted"})
-                return
-
-            stream = self._provider.stream(
-                messages=[
-                    {"role": "system", "content": self.system},
-                    *[{k: v for k, v in m.items() if k != "usage"} for m in self.history],
-                ],
-                tool_schemas=tools.SCHEMAS,
-                max_completion_tokens=self.max_tokens,
-            )
-            with self._active_lock:
-                self._active_stream = stream
-
-            content_buf: List[str] = []
-            tool_calls: Dict[int, Dict[str, str]] = {}
-            text_open = False
-            usage = None
-
-            try:
-                for chunk in stream:
-                    if self._cancel.is_set():
-                        break
-                    if getattr(chunk, "usage", None):
-                        usage = chunk.usage
-                    if not chunk.choices:
-                        continue
-                    delta = chunk.choices[0].delta
-                    if delta is None:
-                        continue
-
-                    if delta.content:
-                        if not text_open:
-                            emit({"type": "text_start"})
-                            text_open = True
-                        emit({"type": "text_delta", "content": delta.content})
-                        content_buf.append(delta.content)
-
-                    if delta.tool_calls:
-                        for tc in delta.tool_calls:
-                            slot = tool_calls.setdefault(
-                                tc.index, {"id": "", "name": "", "args": ""}
-                            )
-                            if tc.id:
-                                slot["id"] = tc.id
-                            if tc.function:
-                                if tc.function.name:
-                                    slot["name"] = tc.function.name
-                                if tc.function.arguments:
-                                    slot["args"] += tc.function.arguments
-            except Exception:
-                if not self._cancel.is_set():
-                    raise
-            finally:
-                with self._active_lock:
-                    if self._active_stream is stream:
-                        self._active_stream = None
-
-            if self._cancel.is_set():
-                if text_open:
-                    emit({"type": "text_end"})
-                emit({"type": "error", "message": "interrupted"})
-                return
-
-            if text_open:
-                emit({"type": "text_end"})
-
-            full_text = "".join(content_buf)
-            assistant_entry: Dict[str, Any] = {
-                "role": "assistant",
-                "content": full_text or None,
-            }
-            if usage:
-                assistant_entry["usage"] = _usage_dict(usage)
-            if tool_calls:
-                assistant_entry["tool_calls"] = [
-                    {
-                        "id": v["id"],
-                        "type": "function",
-                        "function": {"name": v["name"], "arguments": v["args"]},
-                    }
-                    for _, v in sorted(tool_calls.items())
-                ]
-            self.history.append(assistant_entry)
-
-            if not tool_calls:
-                self.persist()
-                return
-
-            for _, v in sorted(tool_calls.items()):
-                if self._cancel.is_set():
-                    emit({"type": "error", "message": "interrupted"})
-                    return
-                try:
-                    args = json.loads(v["args"] or "{}")
-                except json.JSONDecodeError:
-                    args = {"_raw": v["args"]}
-                result = tools.run(v["name"], args, self._cancel)
-                emit({
-                    "type": "tool",
-                    "name": v["name"],
-                    "args": args,
-                    "result": result,
-                })
-                if self._cancel.is_set():
-                    emit({"type": "error", "message": "interrupted"})
-                    return
-                self.history.append({
-                    "role": "tool",
-                    "tool_call_id": v["id"],
-                    "content": result,
-                })
-                self.persist()
+        completed = run_turn(
+            provider=self._provider,
+            system=self.system,
+            history=self.history,
+            max_tokens=self.max_tokens,
+            cancel=self._cancel,
+            active_lock=self._active_lock,
+            active_stream_ref=self._active_stream_ref,
+            emit=emit,
+        )
+        if completed:
+            self.persist()
