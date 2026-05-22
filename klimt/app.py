@@ -206,11 +206,6 @@ class Api:
             if finish:
                 self._done()
 
-    def reset(self) -> dict:
-        self._session.reset()
-        self._sync_input_history()
-        return {"ok": True}
-
     def interrupt(self) -> dict:
         with self._busy_lock:
             was_busy = self._busy

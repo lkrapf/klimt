@@ -1,34 +1,63 @@
 # Klimt
 
-A tiny standalone-window harness for Azure OpenAI. Python + pywebview + an
-HTML/JS frontend with streaming Markdown rendering, KaTeX, mermaid, and model
-tool calls.
+Klimt is a small local LLM harness with a native `pywebview` window, streaming
+Markdown UI, persistent sessions, prompt layering, skills, and model tool calls.
+It supports Azure OpenAI, OpenAI, OpenAI-compatible endpoints, Ollama, and
+Anthropic through Anthropic's OpenAI-compatible endpoint.
 
-## Setup
+## Requirements
+
+- Python 3.10+
+- A working GUI environment for `pywebview`
+  - macOS works through WebKit.
+  - Linux may need GTK/WebKit packages installed by the OS package manager.
+- One configured model endpoint.
+
+Install from a checkout:
 
 ```bash
+git clone <repo-url> klimt
+cd klimt
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+python3 -m klimt
+```
+
+Running with `python3 -m klimt` assumes you are in the repository checkout. If you
+want a packaged install, add packaging first; Klimt does not currently ship one.
+
+## Quick start: Azure via environment
+
+The simplest configuration is the Azure OpenAI env-only path:
+
+```bash
 export AZURE_OPENAI_BASE_URL=https://<your-resource>.openai.azure.com
 export AZURE_OPENAI_API_KEY=...
 export AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
 python3 -m klimt
 ```
 
-## Model list
+Optional Azure/default-model env:
 
-`/model` reads selectable endpoint configs from `~/.klimt/models.json`. A plain
-string is treated as a legacy Azure OpenAI deployment name:
+- `AZURE_OPENAI_API_VERSION` — defaults to `2024-10-21`.
+- `KLIMT_MODEL` — default model selector for new sessions.
+- `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator;
+  defaults to `128000`.
+- `KLIMT_DEBUG=1` — enables webview devtools.
+
+## Model configuration
+
+For multiple selectable endpoints, create `~/.klimt/models.json`.
+
+A plain string is treated as an Azure deployment name:
 
 ```json
 ["gpt-4.1", "o3"]
 ```
 
-For multiple endpoint types, use objects. `name` is what you type after
-`/model`; `model` or `deployment` is what gets sent to the provider. Keep API
-keys in environment variables via `api_key_env`; putting secrets directly in
-JSON works but is a bad habit.
+For explicit endpoints, use objects. `name` is what you type after `/model`.
+`model` or `deployment` is what Klimt sends to the provider.
 
 ```json
 {
@@ -40,6 +69,12 @@ JSON works but is a bad habit.
       "base_url": "https://your-resource.openai.azure.com",
       "api_version": "2024-10-21",
       "api_key_env": "AZURE_OPENAI_API_KEY"
+    },
+    {
+      "name": "openai-4.1",
+      "provider": "openai",
+      "model": "gpt-4.1",
+      "api_key_env": "OPENAI_API_KEY"
     },
     {
       "name": "local-llama",
@@ -57,86 +92,167 @@ JSON works but is a bad habit.
 }
 ```
 
-Supported `provider` values are `azure`, `ollama`, `openai`, and `anthropic`.
-`openai` is also useful for OpenAI-compatible gateways: set `base_url` and
-`api_key_env`. Anthropic is currently wired through its OpenAI SDK
-compatibility layer, so native-only Anthropic features are not exposed.
+Supported `provider` values are:
 
-Optional env:
+- `azure`
+- `openai`
+- `ollama`
+- `anthropic`
 
-- `AZURE_OPENAI_API_VERSION` — defaults to `2024-10-21`
-- `KLIMT_MODEL` — override the default deployment name used for new sessions
-- `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator. If unset, Klimt hides the percentage because Azure does not expose this reliably via the chat API.
-- `KLIMT_DEBUG=1` — enables the webview devtools
+`openai` can also point at OpenAI-compatible gateways by setting `base_url` and
+`api_key_env`. Anthropic is currently wired through its OpenAI SDK compatibility
+layer, so native-only Anthropic features are not exposed.
 
-## Streaming showcase
+## Global and project instructions
 
-Klimt streams assistant output token-by-token from Azure OpenAI and updates the
-current assistant bubble incrementally. While text is arriving, the frontend does
-a cheap Markdown-only render once per animation frame. At `text_end`, it does the
-expensive final pass for KaTeX and mermaid.
+Klimt reads prompt instructions from Markdown files:
 
-Good prompt for exercising the path:
+- `klimt/KERNEL.md` — harness/tool protocol shipped with Klimt.
+- `~/.klimt/AGENTS.md` — global user profile and preferences.
+- `AGENTS.md` files in the current working tree — project-local instructions.
 
-```text
-Show me a compact streaming demo: first a bullet list, then a Python code block,
-then this equation $$E = mc^2$$, then a small mermaid sequence diagram.
+Minimal global profile example:
+
+```md
+# Agent
+
+Be concise and technical.
+
+# Output
+
+Use GitHub-flavored Markdown.
 ```
 
-What to expect:
+Project `AGENTS.md` files are discovered from the current directory upward and
+injected outermost first. Project instructions may specialize the global profile,
+but they cannot redefine tool behavior or harness safety boundaries.
 
-- the placeholder `thinking_` is removed when the first streamed event arrives;
-- Markdown, lists, tables, and code fences render incrementally;
-- unterminated triple-backtick fences are temporarily auto-closed so partial code
-  blocks don't trash the layout;
-- KaTeX and mermaid render after the stream finishes, not during partial input;
-- tool calls are shown as separate tool boxes between streamed assistant turns.
+Use `/reload` after editing prompt files; existing conversation history is kept.
 
-## Keys
+## Skills
 
-- `Enter` — send
-- `Shift+Enter` — newline
-- `reset` button — clears server-side conversation history
+Skills live under `~/.klimt/skills/**/SKILL.md`. Klimt discovers them at startup
+and injects only the name, description, and path into the system prompt. Full
+skill bodies are loaded on demand.
 
-The top bar shows `working...` while a request is still running and displays approximate context fill as `<percent>/<window>`, e.g. `42.1%/128k`. New sessions start with a unique temporary name and are auto-renamed from the first normal prompt.
+Example:
 
-## Input prefixes
+```text
+~/.klimt/skills/example/SKILL.md
+```
 
-- `!cmd` — run a shell command directly and show the result as a tool box.
-- `/help` — show built-in commands and discovered skills.
-- `/skills` — list available skills with short descriptions.
-- `/compact [N]` — compact older context into structured state, keeping the last N history messages raw (default 8).
-- `/model [name]` — show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`.
-- `/reload` — reload prompt layers (`~/.klimt/AGENTS.md` and project `AGENTS.md` files), skill discovery, `tools.py`, model config, and CSS.
-- `/resume [name]` — resume a saved session for this folder.
-- `/name <name>` — name the current session.
-- `/quit` — close Klimt.
-- `/<skill>` — load `~/.klimt/skills/<skill>/SKILL.md` into the conversation.
+```md
+---
+name: example
+description: Use when the user asks for the example workflow.
+---
+
+# Example skill
+
+Follow these task-specific instructions...
+```
+
+Load a skill explicitly with:
+
+```text
+/example
+```
+
+The model is also instructed to load matching skills itself when the task fits a
+skill description.
+
+## Commands
+
+| command | description |
+|---|---|
+| `!<cmd>` | Run a shell command directly and show the result as a tool box. |
+| `/help` | Show built-in commands and session help. |
+| `/skills` | List discovered skills. |
+| `/compact [N]` | Compact older context, keeping the last N history messages raw. Default: 8. |
+| `/model [name]` | Show or switch the model endpoint for this session. |
+| `/new` | Start a new empty session. |
+| `/sessions` | List saved sessions for this folder. |
+| `/sessions resume <number|name>` | Resume a saved session. |
+| `/sessions delete <number|name>` | Delete a saved session. |
+| `/sessions clear confirm` | Delete all saved sessions for this folder and start a new one. |
+| `/name [name]` | Show or rename the current session. |
+| `/reload` | Reload prompt layers, skills, tools, model config, and CSS. |
+| `/quit` | Close Klimt. |
+| `/<skill>` | Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation. |
+
+## Keys and UI
+
+- `Enter` — send.
+- `Shift+Enter` — newline.
+- `Esc` — interrupt current work.
+
+The top bar shows `working...` while a request is running and displays
+approximate context fill as `<percent>/<window>`, for example `42.1%/128k`.
+New sessions start with a generated temporary name and are auto-renamed from the
+first normal prompt.
+
+Klimt streams assistant output token-by-token. During streaming, the frontend
+renders Markdown cheaply once per animation frame. At `text_end`, it runs the
+more expensive final pass for KaTeX and mermaid. Reasoning/thinking blocks are
+shown separately when the provider streams them.
+
+## Tools exposed to the model
+
+| tool | purpose |
+|---|---|
+| `read` | Read UTF-8 text files with line numbers and capped output. |
+| `edit` | Apply exact, unique, non-overlapping text replacements to one file. |
+| `write` | Write a full file, creating parent directories. |
+| `bash` | Run a shell command with a 120s timeout. |
+| `webfetch` | Fetch and extract text from an HTTP(S) URL. |
+| `websearch` | Search DuckDuckGo's HTML endpoint and return compact results. |
+
+Tool errors are returned to the model as strings so it can recover. `bash` uses
+the current user account and is not sandboxed.
 
 ## Prompt layering
 
-Klimt assembles the system prompt in layers:
+Klimt assembles the system prompt in this physical order:
 
-1. **Kernel** — harness/tool protocol and instruction hierarchy from `klimt/KERNEL.md`.
+1. **Kernel** — harness/tool protocol and instruction hierarchy from
+   `klimt/KERNEL.md`.
 2. **Runtime manifests** — currently available tools and discovered skills.
-3. **Project instructions** — `AGENTS.md` files from the current working tree, outermost first.
-4. **Global profile** — `~/.klimt/AGENTS.md`.
-5. **Current request** — the user turn.
+3. **Global profile** — `~/.klimt/AGENTS.md`.
+4. **Project instructions** — `AGENTS.md` files from the current working tree,
+   outermost first.
 
-Project instructions may specialize the global profile. Nothing below the kernel may redefine tool behavior or harness safety boundaries.
+The kernel defines authority order. Project instructions may specialize the
+global profile because they are more specific to the current working tree.
+Nothing below the kernel may redefine tool behavior, authority order, or harness
+safety boundaries.
+
+## Sessions and storage
+
+Sessions are stored per working folder under:
+
+```text
+~/.klimt/sessions/<folder-hash>/
+```
+
+A new session starts with a generated name and is renamed from the first normal
+user prompt. `/sessions` lists saved sessions for the current folder.
 
 ## Architecture
 
 ```text
 klimt/
-  app.py          # pywebview window + JS bridge (Api class)
-  api.py          # ChatSession: history, streaming, Azure OpenAI tool loop
-  tools.py        # read / write / bash implementations + JSON schemas
-  skills.py       # ~/.klimt/skills discovery
-  web/
-    index.html    # transcript + textarea + CDN deps
-    app.js        # bridge events, streaming renderer, marked/DOMPurify/KaTeX/mermaid
-    style.css
+  KERNEL.md        # non-persona harness prompt
+  prompt.py        # prompt assembly and AGENTS.md discovery
+  app.py           # pywebview window + JS bridge
+  api.py           # ChatSession: history, persistence, compaction
+  runner.py        # streaming model/tool turn loop
+  providers.py     # provider adapter around OpenAI-compatible clients
+  model_config.py  # ~/.klimt/models.json parsing
+  commands.py      # slash/bang command metadata and handling helpers
+  tools.py         # tool implementations + JSON schemas
+  skills.py        # ~/.klimt/skills discovery
+  session_store.py # per-folder session persistence
+  web/             # frontend
 ```
 
 Python owns conversation history. JS calls `window.pywebview.api.send(text)`.
@@ -144,14 +260,12 @@ During the call, Python pushes events into the page via
 `window.klimt.handleEvent(...)`:
 
 | Event | Purpose |
-| --- | --- |
+|---|---|
+| `reasoning_start` / `reasoning_delta` / `reasoning_end` | streamed reasoning block |
+| `reasoning` | restored reasoning block during session replay |
 | `text_start` / `text_delta` / `text_end` | streamed assistant text |
 | `text` | atomic Markdown message, e.g. skill-load confirmation |
 | `tool` | tool call box with name, args, and result |
 | `error` | error surfaced to the transcript |
+| `done` | request/command finished |
 
-## Roadmap
-
-- persist conversations to disk
-- automatic context compaction threshold
-- richer multi-turn tool use

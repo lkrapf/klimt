@@ -6,6 +6,8 @@ Project-local guidance for AI assistants working on this repo.
 
 - **Lean code.** Add features only when needed. No speculative fallbacks, no
   options nobody asked for. Delete code that isn't earning its keep.
+- **No compatibility theater.** Do not keep old APIs, env vars, UI hooks, or
+  fallback paths unless there is a current caller or an explicit requirement.
 - Small, readable modules over clever abstractions.
 - Pushback over politeness. If a request is wrong-headed, say so.
 
@@ -13,95 +15,123 @@ Project-local guidance for AI assistants working on this repo.
 
 - Python 3.10+ (developed against 3.14).
 - `pywebview` for the native window (WebKit on macOS).
-- `openai` SDK with the `AzureOpenAI` client.
-- Frontend: vanilla HTML/JS, `marked` + `DOMPurify` from a CDN.
+- `openai` SDK with OpenAI-compatible chat-completions clients.
+- Frontend: vanilla HTML/JS, `marked` + `DOMPurify` + KaTeX + mermaid from CDNs.
 
-## Azure OpenAI
+## Model providers
 
-- Auth via `AZURE_OPENAI_BASE_URL`, `AZURE_OPENAI_API_KEY`,
-  `AZURE_OPENAI_DEPLOYMENT`. API version optional via
-  `AZURE_OPENAI_API_VERSION` (default `2024-10-21`).
-- The `model` argument to `chat.completions.create` is the **deployment name**,
-  not a model name. Azure quirk.
-- We always use `max_completion_tokens` (not `max_tokens`). Reasoning models
-  (o1/o3/o4 family) require it; current GPT-4o-class deployments accept it.
-  If a deployment ever rejects it, change the keyword — don't add a fallback.
+- Config is read from `~/.klimt/models.json` by `model_config.py`.
+- Supported providers: `azure`, `openai`, `ollama`, `anthropic`.
+- Azure env-only fallback still exists: `AZURE_OPENAI_BASE_URL`,
+  `AZURE_OPENAI_API_KEY`, `AZURE_OPENAI_DEPLOYMENT`, optional
+  `AZURE_OPENAI_API_VERSION`.
+- The value sent as `model` is provider-specific. For Azure it is the deployment
+  name, not the public model name.
+- We use `max_completion_tokens`, not `max_tokens`.
+- We do not send `temperature` or `top_p`.
 
-## Known model gotchas (only fix when actually hit)
+## Known model gotchas
 
 - Some reasoning deployments reject `role: "system"`. If we hit this, replace
-  with `role: "developer"` or drop the system message.
-- Reasoning deployments often reject `temperature`, `top_p`, and `stream`.
-  We don't send any of those today; keep it that way unless a feature needs it.
+  with `role: "developer"` or drop the system message deliberately; don't add a
+  broad fallback until there is a concrete failing provider.
+- Anthropic is currently used through its OpenAI-compatible endpoint. Native-only
+  Anthropic features are not exposed.
 
 ## Streaming
 
-Python streams via `client.chat.completions.create(stream=True)` and pushes
-events to JS by calling `window.klimt.handleEvent(...)` through pywebview's
-`window.evaluate_js`. Event types:
+Python streams via the provider adapter and pushes events to JS by calling
+`window.klimt.handleEvent(...)` through pywebview's `window.evaluate_js`.
 
+Important event types:
+
+- `reasoning_start` / `reasoning_delta` / `reasoning_end` — streamed reasoning.
+- `reasoning` — restored reasoning during session replay.
 - `text_start` / `text_delta` / `text_end` — streamed assistant text.
-- `text` — atomic markdown message (e.g. skill-load confirmation).
-- `tool` — atomic tool box (name, args, result).
+- `text` — atomic Markdown message, e.g. command output.
+- `tool` — atomic tool box with name, args, result.
 - `error` — error string surfaced to the UI.
+- `done` — command/request finished.
 
-During streaming the JS renders markdown only, with an auto-close ``` heuristic
+During streaming the JS renders Markdown only, with an auto-close ``` heuristic
 for unterminated code fences. KaTeX and mermaid run once at `text_end` because
 both choke on partial input and mermaid re-renders are expensive. Renders are
 rAF-throttled to one per frame.
 
 ## Architecture
 
-```
+```text
 klimt/
-  app.py     # pywebview window, Api class exposed to JS
-  api.py     # ChatSession: history + tool-call loop against Azure OpenAI
-  tools.py   # read / write / bash implementations + JSON schemas
-  web/
-    index.html
-    app.js   # bridge calls, marked + DOMPurify + KaTeX + mermaid
-    style.css
+  KERNEL.md        # non-persona harness prompt
+  prompt.py        # prompt assembly and AGENTS.md discovery
+  app.py           # pywebview window + JS bridge
+  api.py           # ChatSession: history, persistence, compaction
+  runner.py        # streaming model/tool turn loop
+  providers.py     # provider adapter around OpenAI-compatible clients
+  model_config.py  # ~/.klimt/models.json parsing
+  commands.py      # slash/bang command metadata and helpers
+  tools.py         # tools + JSON schemas
+  skills.py        # ~/.klimt/skills discovery
+  session_store.py # per-folder session persistence
+  web/             # frontend
 ```
 
 - Python owns conversation history.
-- JS calls `window.pywebview.api.send(text)` and gets `{ok, events}` back,
-  where `events` is a list of `{type: 'text'|'tool', ...}` entries.
+- JS calls `window.pywebview.api.send(text)`.
+- Python pushes UI events via `window.klimt.handleEvent(...)`.
 
 ## Input prefixes
 
-Handled in `ChatSession.send` before any model call:
+Handled before any model call:
 
-- `!cmd` — runs `cmd` via the bash tool. Output is shown in the UI and
-  appended to history as a user message (`$ cmd\n<output>`). No model call.
-- `/name` — loads `~/.klimt/skills/<name>/SKILL.md` and appends its body to
-  history as a user message. Match is by directory name, then by frontmatter
-  `name:`. No model call.
-- `/reload` — reloads prompt layers, skill discovery, `tools.py`, the
-  Azure client/model config, and asks the frontend to cache-bust `style.css`.
-  No model call. Conversation history is kept.
+- `!cmd` — runs `cmd` via the bash tool. Output is shown in the UI and appended
+  to history as a user message (`$ cmd\n<output>`). No model call.
+- `/help` — shows command help.
+- `/skills` — lists discovered skills.
+- `/compact [N]` — compacts older context, keeping the last N messages raw.
+- `/model [name]` — shows or switches the model endpoint.
+- `/new` — starts a new empty session.
+- `/sessions ...` — lists/resumes/deletes/clears sessions for this folder.
+- `/name [name]` — shows or renames the current session.
+- `/reload` — reloads prompt layers, skills, tools, model config, and CSS.
+- `/quit` — exits immediately.
+- `/<skill>` — loads `~/.klimt/skills/<skill>/SKILL.md` into history.
 
-At startup `app.py` enumerates all skills and appends a `## Available skills`
-block (name + description) to the system prompt. The model knows what exists
-but doesn't carry the full SKILL.md bodies until the user invokes one.
+## Skills
 
-Skill frontmatter parsing is a 10-line shim in `skills.py`; no PyYAML dep.
+At startup `prompt.py` enumerates all `~/.klimt/skills/**/SKILL.md` files and
+adds a runtime skill manifest to the system prompt. The model sees skill names,
+descriptions, and paths, but does not carry full skill bodies until a matching
+skill is loaded.
+
+Skill frontmatter parsing is a small shim in `skills.py`; no PyYAML dependency.
 It handles single-line values and folded multi-line `description:`.
 
 ## Tools
 
-The model has three tools: `read(path)`, `write(path, content)`, `bash(command)`.
+The model has six tools:
+
+- `read(path, offset?, limit?)`
+- `edit(path, edits)`
+- `write(path, content)`
+- `bash(command)`
+- `webfetch(url)`
+- `websearch(query)`
+
+Notes:
 
 - `bash` runs with `shell=True` and a 120s timeout. No allowlist, no sandbox.
   The model can do anything the user can.
-- `write` overwrites unconditionally and creates parent dirs. No diff preview.
-- All tool errors are returned to the model as strings, not raised.
-- The send loop iterates: call → if `tool_calls`, run them and feed results
-  back, repeat until the model returns a plain text answer.
+- `edit` requires exact, unique, non-overlapping replacements.
+- `write` overwrites unconditionally and creates parent directories.
+- Tool errors are returned to the model as strings, not raised.
+- The send loop iterates: model call → tool calls → tool results → next model
+  call, until the model returns a final text answer.
 - `text_select=True` is required on `create_window` or selection is dead.
 
 ## Prompt layering
 
-`klimt/prompt.py` assembles the system prompt in layers:
+`klimt/prompt.py` assembles the system prompt in physical order:
 
 1. kernel/harness protocol from `klimt/KERNEL.md`;
 2. generated tool and skill manifests;
@@ -113,8 +143,7 @@ instructions in the global profile, not in the kernel. Project instructions may
 specialize the global profile but must not redefine tool behavior or harness
 safety boundaries.
 
-## When adding features
+## Planning
 
-- Streaming, KaTeX, mermaid, syntax highlighting, persistence, tool use — all
-  on the roadmap but **not yet**. Don't preemptively scaffold for them.
-- Keep CDN deps minimal; vendor only when we need offline.
+Use `PLAN.md` for roadmap/planning notes. Keep `README.md` focused on user setup
+and operation, and this file focused on maintainer guidance for agents.

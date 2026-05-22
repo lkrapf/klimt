@@ -176,11 +176,6 @@ class ChatSession:
         self._abandoned = True
         self.interrupt()
 
-    def reset(self) -> None:
-        self.history.clear()
-        self.input_history.clear()
-        self.persist()
-
     def persist(self) -> None:
         if self._abandoned:
             return
