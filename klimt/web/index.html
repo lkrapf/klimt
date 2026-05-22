@@ -16,6 +16,9 @@
     mermaid.initialize({
       startOnLoad: false,
       theme: "base",
+      flowchart: {
+        htmlLabels: false,
+      },
       themeVariables: {
         background: "#150a00",
         primaryColor: "#2a1800",
@@ -24,7 +27,7 @@
         lineColor: "#ffc94d",
         secondaryColor: "#3a2400",
         tertiaryColor: "#150a00",
-        fontFamily: "inherit",
+        fontFamily: "IBM Plex Mono, Berkeley Mono, Menlo, monospace",
       },
     });
     window.mermaid = mermaid;

@@ -407,6 +407,10 @@ body.hide-reasoning .msg.reasoning { display: none; }
   text-align: center;
 }
 .msg .mermaid svg { max-width: 100%; height: auto; }
+.msg .mermaid foreignObject,
+.msg .mermaid foreignObject * {
+  box-sizing: content-box;
+}
 
 /* KaTeX recolor to amber; kill the bright white default */
 .msg .katex {
