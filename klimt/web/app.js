@@ -1,14 +1,14 @@
 "use strict";
 
 import { installEventHandler } from "./events.js";
-import { finishWork, installInputHandlers, setInputHistory } from "./input.js";
+import { finishWork, installInputHandlers, setInputHistory, submitCommand } from "./input.js";
 import { setContextUsage, setSessionLabel } from "./status.js";
 import { addStartup } from "./transcript.js";
 
 const klimt = { pending: null, current: null, suppressUntilDone: false };
 window.klimt = klimt;
 
-installEventHandler(klimt, () => finishWork(klimt), setInputHistory);
+installEventHandler(klimt, () => finishWork(klimt), setInputHistory, (command, opts) => submitCommand(klimt, command, opts));
 installInputHandlers(klimt);
 
 let initialized = false;

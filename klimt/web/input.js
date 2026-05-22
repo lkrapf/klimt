@@ -84,14 +84,14 @@ function interruptWork(klimt) {
   });
 }
 
-async function send(klimt) {
-  const text = input.value.trim();
-  if (!text || working) return;
+export async function submitCommand(klimt, text, { echo = true } = {}) {
+  text = String(text ?? "").trim();
+  if (!text || working) return false;
 
   rememberInput(text);
   setInputValue("");
   setWorking(true);
-  addMessage("user", text, { markdown: false });
+  if (echo) addMessage("user", text, { markdown: false });
   klimt.pending = addPending();
 
   try {
@@ -100,10 +100,16 @@ async function send(klimt) {
       addMessage("error", "**Error:** " + res.error);
       finishWork(klimt);
     }
+    return true;
   } catch (e) {
     addMessage("error", "**Bridge error:** " + (e?.message || e));
     finishWork(klimt);
+    return false;
   }
+}
+
+async function send(klimt) {
+  submitCommand(klimt, input.value);
 }
 
 export function installInputHandlers(klimt) {

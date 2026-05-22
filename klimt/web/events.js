@@ -1,3 +1,4 @@
+import { addSelect } from "./selectors.js";
 import { reloadCss, setContextUsage, setSessionLabel } from "./status.js";
 import {
   addMessage,
@@ -12,7 +13,7 @@ import {
   startStreaming,
 } from "./transcript.js";
 
-export function installEventHandler(klimt, finishWork, setInputHistory) {
+export function installEventHandler(klimt, finishWork, setInputHistory, submitCommand) {
   klimt.handleEvent = function(ev) {
     if (klimt.suppressUntilDone && ev.type !== "done") return;
     if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
@@ -53,6 +54,9 @@ export function installEventHandler(klimt, finishWork, setInputHistory) {
         break;
       case "text":
         addMessage("assistant", ev.content || "");
+        break;
+      case "select":
+        addSelect(ev, (command, opts) => submitCommand(command, opts));
         break;
       case "message": {
         const role = ev.role || "assistant";

@@ -191,6 +191,37 @@ body.hide-reasoning .msg.reasoning { display: none; }
   border: 1px dashed var(--border);
 }
 
+.msg.selector .body::before {
+  content: "> ";
+  color: var(--dim);
+}
+.msg.selector select {
+  width: min(100%, 520px);
+  min-height: 34px;
+  background: transparent;
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  padding: 6px 8px;
+  font: inherit;
+  text-shadow: var(--glow);
+  outline: none;
+  appearance: none;
+  -webkit-appearance: none;
+  box-shadow: none;
+}
+.msg.selector .body {
+  position: relative;
+  display: inline-block;
+  max-width: 100%;
+}
+.msg.selector select:focus { border-color: var(--fg); }
+.msg.selector select:disabled { color: var(--dim); border-color: var(--border); }
+.msg.selector option {
+  background: var(--bg);
+  color: var(--fg);
+}
+
 /* syntax-highlighted markdown code blocks
    Keep highlight.js inside the terminal's amber palette. No rainbow syntax. */
 .msg pre code.hljs {

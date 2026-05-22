@@ -25,6 +25,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),
     CommandSpec("/new", "/new", "Start a completely new empty session."),
+    CommandSpec("/session", "/session", "Choose a saved session from an interactive selector."),
     CommandSpec("/sessions", "/sessions [resume|delete|clear] ...", "List, resume, delete, or clear saved sessions for this folder."),
     CommandSpec("/name", "/name [name]", "Show or rename the current session."),
     CommandSpec("/reload", "/reload", "Reload prompt layers, skills, tools, model endpoint, and CSS."),
@@ -59,10 +60,14 @@ def command_rows() -> list[tuple[str, str]]:
     return [(spec.usage, spec.description) for spec in SPECS]
 
 
+def _table_cell(text: str) -> str:
+    return text.replace("|", "\\|")
+
+
 def command_markdown_table() -> str:
     lines = ["| command | description |", "|---|---|"]
     for usage, description in command_rows():
-        lines.append(f"| `{usage}` | {description} |")
+        lines.append(f"| `{_table_cell(usage)}` | {_table_cell(description)} |")
     return "\n".join(lines)
 
 

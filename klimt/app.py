@@ -157,6 +157,9 @@ class Api:
         if command == "/new":
             self._new()
             return True
+        if command == "/session":
+            self._session_picker()
+            return True
         if command == "/sessions" or command.startswith("/sessions "):
             self._sessions(command[9:].strip())
             return True
@@ -334,6 +337,27 @@ class Api:
             return "unknown"
         return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
 
+    def _session_picker(self) -> None:
+        sessions = self._session.list_sessions()
+        self._session_choices = sessions
+        if not sessions:
+            self._emit({"type": "text", "content": "_no saved sessions for this folder_"})
+            return
+
+        self._emit({
+            "type": "select",
+            "title": "Session",
+            "placeholder": "choose session...",
+            "options": [
+                {
+                    "label": f"{s.get('name') or ''} · {self._format_session_time(s.get('updated'))}",
+                    "value": f"/sessions resume {s.get('name') or ''}",
+                    "current": (s.get("name") or "") == self._session.session_name,
+                }
+                for s in sessions
+            ],
+        })
+
     def _list_sessions(self) -> None:
         sessions = self._session.list_sessions()
         self._session_choices = sessions
@@ -472,42 +496,22 @@ class Api:
         configs = list_model_configs()
         choices = [cfg.name for cfg in configs]
         if not model:
-            lines = [
-                f"current model: **{self._md_escape(self._session.model)}**",
-                "",
-                "## Configured models",
-                "",
-            ]
-            if choices:
-                lines.extend([
-                    "| current | name | provider | model/deployment | endpoint | API version |",
-                    "|---|---|---|---|---|---|",
-                ])
-                for cfg in configs:
-                    current = "yes" if cfg.name == self._session.model else ""
-                    endpoint = cfg.base_url or ""
-                    api_version = cfg.api_version or ""
-                    lines.append(
-                        "| "
-                        + " | ".join([
-                            current,
-                            f"`{self._md_escape(cfg.name)}`",
-                            self._md_escape(cfg.provider),
-                            f"`{self._md_escape(cfg.provider_model())}`",
-                            self._md_escape(endpoint),
-                            self._md_escape(api_version),
-                        ])
-                        + " |"
-                    )
-            else:
-                lines.append("_none configured_")
-            lines.extend([
-                "",
-                "Usage: `/model <name>`",
-                "",
-                "Create `~/.klimt/models.json` to define selectable Azure, Ollama, OpenAI-compatible, or Anthropic endpoints.",
-            ])
-            self._emit({"type": "text", "content": "\n".join(lines)})
+            if not choices:
+                self._emit({"type": "text", "content": "_no models configured; create `~/.klimt/models.json`_"})
+                return
+            self._emit({
+                "type": "select",
+                "title": "Model",
+                "placeholder": "choose model...",
+                "options": [
+                    {
+                        "label": f"{cfg.name} · {cfg.provider} · {cfg.provider_model()}",
+                        "value": f"/model {cfg.name}",
+                        "current": cfg.name == self._session.model,
+                    }
+                    for cfg in configs
+                ],
+            })
             return
 
         requested = model.strip()
