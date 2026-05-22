@@ -60,6 +60,13 @@ export function setQueueCount(count) {
   updateStatus();
 }
 
+export function showTabStatus(tab) {
+  setSessionLabel(tab?.model, tab?.session);
+  setContextUsage(tab?.context);
+  setWorking(Boolean(tab?.working));
+  setQueueCount(tab?.queue?.length || 0);
+}
+
 export function reloadCss() {
   const href = new URL("style.css", window.location.href).href;
   const bust = `v=${Date.now()}`;

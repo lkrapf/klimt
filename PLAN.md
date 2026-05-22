@@ -7,16 +7,16 @@ roadmap theater.
 
 - [x] Queue user messages submitted while a request is active.
 - [ ] Add a session tree / branching model instead of only linear named sessions.
-- [ ] Add independent UI tabs.
-  - [ ] Put tabs on top and move active-tab status below the input line.
-  - [ ] Each tab owns its own `ChatSession`, model, history, queue, and busy state.
-  - [ ] Route all stream events by tab id; never rely on the currently selected tab.
-  - [ ] Provide visible tab controls: click tab, `+` new tab, close button.
-  - [ ] Add tab shortcuts: Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+Shift+Tab, Alt+1..9; do not bind Cmd shortcuts.
-  - [ ] Add `/hotkeys` for keyboard shortcut documentation; keep `/help` focused on commands and link to `/hotkeys`.
-  - [ ] Do not add `/tab` commands in the first cut.
-  - [ ] Keep tab layout ephemeral in the first cut.
-  - [ ] Do not add cross-posting in the first cut.
+- [x] Add independent UI tabs.
+  - [x] Put tabs on top and move active-tab status below the input line.
+  - [x] Each tab owns its own `ChatSession`, model, history, queue, and busy state.
+  - [x] Route all stream events by tab id; never rely on the currently selected tab.
+  - [x] Provide visible tab controls: click tab, `+` new tab, close button.
+  - [x] Add tab shortcuts: Ctrl+T, Ctrl+W, Ctrl+Tab, Ctrl+Shift+Tab, Alt+1..9; do not bind Cmd shortcuts.
+  - [x] Add `/hotkeys` for keyboard shortcut documentation; keep `/help` focused on commands and link to `/hotkeys`.
+  - [x] Do not add `/tab` commands in the first cut.
+  - [x] Keep tab layout ephemeral in the first cut.
+  - [x] Do not add cross-posting in the first cut.
 - [ ] Add explicit quoted cross-post / handoff between tabs.
   - [ ] Preserve provenance and make forwarded content non-authoritative by default.
   - [ ] Prefer summaries or selected quotes over ambient tab-to-tab chat.

@@ -165,6 +165,7 @@ skill description.
 |---|---|
 | `!<cmd>` | Run a shell command directly and show the result as a tool box. |
 | `/help` | Show built-in commands and session help. |
+| `/hotkeys` | Show keyboard shortcuts. |
 | `/skills` | List discovered skills. |
 | `/compact [N]` | Compact older context, keeping the last N history messages raw. Default: 8. |
 | `/model [name]` | Show or switch the model endpoint for this session. |
@@ -180,14 +181,33 @@ skill description.
 
 ## Keys and UI
 
+Klimt has independent UI tabs. Each tab owns its own session, model, history,
+queue, and busy state. Tab layout is ephemeral; saved sessions remain the durable
+unit of storage.
+
+Visible controls:
+
+- Click a tab to activate it.
+- `+` opens a new tab.
+- `×` closes an idle tab.
+
+Keyboard shortcuts:
+
 - `Enter` — send.
 - `Shift+Enter` — newline.
-- `Esc` — interrupt current work.
+- `Esc` — interrupt current tab's work.
+- `Ctrl+T` — new tab.
+- `Ctrl+W` — close current tab.
+- `Ctrl+Tab` / `Ctrl+Shift+Tab` — next / previous tab.
+- `Alt+1` ... `Alt+9` — switch to tab by index.
+- `Ctrl+R` — toggle reasoning visibility.
+- `Ctrl+J` / `Ctrl+K` — scroll current transcript.
 
-The top bar shows `working...` while a request is running and displays
-approximate context fill as `<percent>/<window>`, for example `42.1%/128k`.
-New sessions start with a generated temporary name and are auto-renamed from the
-first normal prompt.
+Cmd shortcuts are deliberately unbound.
+
+The status bar below the input shows the active tab's model, saved session name,
+working/queue state, and approximate context usage. New sessions start with a
+generated temporary name and are auto-renamed from the first normal prompt.
 
 Klimt streams assistant output token-by-token. During streaming, the frontend
 renders Markdown cheaply once per animation frame. At `text_end`, it runs the

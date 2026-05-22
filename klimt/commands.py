@@ -20,7 +20,8 @@ class CommandSpec:
 
 SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("!", "!<cmd>", "Run a shell command directly and show the result as a tool box.", "background"),
-    CommandSpec("/help", "/help", "Show this help.", "allow"),
+    CommandSpec("/help", "/help", "Show command help.", "allow"),
+    CommandSpec("/hotkeys", "/hotkeys", "Show keyboard shortcuts.", "allow"),
     CommandSpec("/skills", "/skills", "List available skills with short descriptions.", "allow"),
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),
@@ -87,15 +88,30 @@ def help_markdown(format_session_help: Callable[[], list[str]] | None = None) ->
 
     lines.extend([
         "",
-        "## Keys",
+        "Keyboard shortcuts moved to `/hotkeys`.",
+    ])
+    return "\n".join(lines)
+
+
+def hotkeys_markdown() -> str:
+    return "\n".join([
+        "## Hotkeys",
         "",
         "| key | action |",
         "|---|---|",
         "| `Enter` | Send. |",
         "| `Shift+Enter` | Insert newline. |",
-        "| `Esc` | Interrupt current work. |",
+        "| `Esc` | Interrupt current tab's work. |",
+        "| `Ctrl+T` | New tab. |",
+        "| `Ctrl+W` | Close current tab. |",
+        "| `Ctrl+Tab` | Next tab. |",
+        "| `Ctrl+Shift+Tab` | Previous tab. |",
+        "| `Alt+1` ... `Alt+9` | Switch to tab 1 ... 9. |",
+        "| `Ctrl+R` | Toggle reasoning visibility. |",
+        "| `Ctrl+J` / `Ctrl+K` | Scroll current transcript. |",
+        "",
+        "Cmd shortcuts are deliberately unbound.",
     ])
-    return "\n".join(lines)
 
 
 def run_shell(session: Any, command: str) -> list[dict[str, Any]]:

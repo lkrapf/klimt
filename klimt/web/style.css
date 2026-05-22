@@ -31,7 +31,7 @@ html, body {
 
 body {
   display: grid;
-  grid-template-rows: auto 1fr auto;
+  grid-template-rows: auto 1fr auto auto;
   height: 100vh;
 }
 
@@ -56,14 +56,70 @@ html, body, .msg, .msg * {
 #input { -webkit-user-select: text; user-select: text; }
 
 #topbar {
-  display: flex; align-items: center; gap: 14px;
+  display: flex; align-items: stretch; gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
+  min-width: 0;
 }
 #title {
   color: var(--hot);
   letter-spacing: 0;
   text-transform: none;
+  align-self: center;
+  flex: 0 0 auto;
+}
+#tabs {
+  display: flex;
+  align-items: stretch;
+  gap: 4px;
+  min-width: 0;
+  overflow-x: auto;
+  flex: 1;
+}
+.tab, #new-tab {
+  background: transparent;
+  color: var(--dim);
+  border: 1px solid var(--border);
+  font: inherit;
+  text-shadow: var(--glow);
+  border-radius: 0;
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 220px;
+  min-width: 90px;
+  padding: 3px 6px;
+}
+.tab.active {
+  color: var(--hot);
+  border-color: var(--fg);
+}
+.tab.working .tab-label::after {
+  content: " *";
+  color: var(--hot);
+}
+.tab-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+  text-align: left;
+}
+.tab-close { color: var(--dim); }
+.tab-close:hover { color: #ff6a3a; }
+#new-tab {
+  flex: 0 0 auto;
+  min-width: 28px;
+  color: var(--hot);
+}
+#active-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 4px 12px;
+  border-top: 1px solid var(--border);
 }
 .muted { color: var(--dim); font-size: 12px; }
 .context.warning { color: #ffb347; }
@@ -98,13 +154,21 @@ body.working .status::after {
 }
 
 
-#transcript {
+#transcripts {
+  min-height: 0;
+  position: relative;
+}
+.transcript {
   overflow-y: auto;
   overflow-x: hidden;
   min-height: 0;
+  height: 100%;
   padding: 14px 18px;
-  display: flex; flex-direction: column; gap: 14px;
+  display: none;
+  flex-direction: column;
+  gap: 14px;
 }
+.transcript.active { display: flex; }
 
 .startup-mark {
   align-self: flex-start;

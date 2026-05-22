@@ -1,40 +1,40 @@
 import { setQueueCount, setWorking as setWorkingStatus } from "./status.js";
-import { addMessage, addPending, finalizeStreaming } from "./transcript.js";
+import { activeTab, activeId, activateTab, addTab, allTabs, closeTab as closeLocalTab, updateTab } from "./tabs.js";
+import { addMessage, addPending, finalizeStreaming, useTranscript } from "./transcript.js";
 
 const input = document.getElementById("input");
-let inputHistory = [];
 let historyPos = null;
 let historyDraft = "";
-let working = false;
-let queue = [];
 
-export function setInputHistory(items) {
-  inputHistory = Array.isArray(items) ? items.slice() : [];
+export function setInputHistory(tab, items) {
+  tab.inputHistory = Array.isArray(items) ? items.slice() : [];
   historyPos = null;
   historyDraft = "";
 }
 
-export function isWorking() {
-  return working;
-}
-
-export function setWorking(on) {
-  working = setWorkingStatus(on);
-}
-
-export function finishWork(klimt) {
-  if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
-  if (klimt.reasoning) {
-    klimt.reasoning.div?.classList.remove("streaming");
-    klimt.reasoning = null;
+export function finishWork(klimt, tab = activeTab()) {
+  useTranscript(tab.id);
+  if (tab.pending) { tab.pending.remove(); tab.pending = null; }
+  if (tab.reasoning) {
+    tab.reasoning.div?.classList.remove("streaming");
+    tab.reasoning = null;
   }
-  if (klimt.current) {
-    finalizeStreaming(klimt.current);
-    klimt.current = null;
+  if (tab.current) {
+    finalizeStreaming(tab.current);
+    tab.current = null;
   }
-  setWorking(false);
+  tab.working = false;
+  updateActiveStatus(tab);
   input.focus();
-  runNextQueued(klimt);
+  runNextQueued(klimt, tab);
+}
+
+function updateActiveStatus(tab = activeTab()) {
+  updateTab(tab.id, { working: tab.working });
+  if (tab.id === activeId()) {
+    setWorkingStatus(tab.working);
+    setQueueCount(tab.queue.length);
+  }
 }
 
 function resizeInput() {
@@ -51,14 +51,16 @@ function setInputValue(text) {
   input.selectionStart = input.selectionEnd = input.value.length;
 }
 
-function rememberInput(text) {
+function rememberInput(tab, text) {
   if (!text) return;
-  if (inputHistory[inputHistory.length - 1] !== text) inputHistory.push(text);
+  if (tab.inputHistory[tab.inputHistory.length - 1] !== text) tab.inputHistory.push(text);
   historyPos = null;
   historyDraft = "";
 }
 
 function navigateHistory(delta) {
+  const tab = activeTab();
+  const inputHistory = tab.inputHistory;
   if (!inputHistory.length) return false;
 
   if (historyPos === null) {
@@ -75,69 +77,101 @@ function navigateHistory(delta) {
 }
 
 function interruptWork(klimt) {
-  if (!working) return;
+  const tab = activeTab();
+  if (!tab.working) return;
 
-  clearQueued();
-  klimt.suppressUntilDone = true;
-  finishWork(klimt);
+  clearQueued(tab);
+  tab.suppressUntilDone = true;
+  finishWork(klimt, tab);
   addMessage("system", "_interrupted_ queued messages cleared_");
 
-  window.pywebview.api.interrupt().catch((e) => {
+  window.pywebview.api.interrupt(tab.id).catch((e) => {
+    useTranscript(tab.id);
     addMessage("error", "**Bridge error:** " + (e?.message || e));
   });
 }
 
-function clearQueued() {
-  for (const item of queue) item.pending?.remove();
-  queue = [];
-  setQueueCount(0);
+function clearQueued(tab) {
+  for (const item of tab.queue) item.pending?.remove();
+  tab.queue = [];
+  if (tab.id === activeId()) setQueueCount(0);
 }
 
-function queueCommand(klimt, text, echo) {
-  rememberInput(text);
+function queueCommand(tab, text, echo) {
+  rememberInput(tab, text);
   setInputValue("");
+  useTranscript(tab.id);
   if (echo) addMessage("user", text, { markdown: false });
   const pending = addPending("queued");
-  queue.push({ text, echo: false, pending });
-  setQueueCount(queue.length);
+  tab.queue.push({ text, echo: false, pending });
+  if (tab.id === activeId()) setQueueCount(tab.queue.length);
   return true;
 }
 
-function runNextQueued(klimt) {
-  if (working || klimt.suppressUntilDone || !queue.length) return;
-  const item = queue.shift();
+function runNextQueued(klimt, tab) {
+  if (tab.working || tab.suppressUntilDone || !tab.queue.length) return;
+  const item = tab.queue.shift();
   item.pending?.remove();
-  setQueueCount(queue.length);
-  submitCommand(klimt, item.text, { echo: item.echo });
+  if (tab.id === activeId()) setQueueCount(tab.queue.length);
+  submitCommand(klimt, item.text, { echo: item.echo, tab });
 }
 
-export async function submitCommand(klimt, text, { echo = true } = {}) {
+export async function submitCommand(klimt, text, { echo = true, tab = activeTab() } = {}) {
   text = String(text ?? "").trim();
   if (!text) return false;
-  if (working) return queueCommand(klimt, text, echo);
+  if (tab.working) return queueCommand(tab, text, echo);
 
-  rememberInput(text);
+  rememberInput(tab, text);
   setInputValue("");
-  setWorking(true);
+  tab.working = true;
+  updateActiveStatus(tab);
+  useTranscript(tab.id);
   if (echo) addMessage("user", text, { markdown: false });
-  klimt.pending = addPending();
+  tab.pending = addPending();
 
   try {
-    const res = await window.pywebview.api.send(text);
+    const res = await window.pywebview.api.send(text, tab.id);
     if (!res.ok) {
+      useTranscript(tab.id);
       addMessage("error", "**Error:** " + res.error);
-      finishWork(klimt);
+      finishWork(klimt, tab);
     }
     return true;
   } catch (e) {
+    useTranscript(tab.id);
     addMessage("error", "**Bridge error:** " + (e?.message || e));
-    finishWork(klimt);
+    finishWork(klimt, tab);
     return false;
   }
 }
 
 async function send(klimt) {
   submitCommand(klimt, input.value);
+}
+
+async function createNewTab() {
+  const res = await window.pywebview.api.new_tab();
+  if (res.ok) addTab(res.tab);
+}
+
+async function closeTab(tabId) {
+  const res = await window.pywebview.api.close_tab(tabId);
+  if (!res.ok) {
+    useTranscript(tabId || activeId());
+    addMessage("error", "**Error:** " + res.error);
+  }
+}
+
+function switchRelative(delta) {
+  const list = allTabs();
+  const idx = list.findIndex((t) => t.id === activeId());
+  const next = list[(idx + delta + list.length) % list.length];
+  if (next) activateTab(next.id);
+}
+
+function switchNumber(n) {
+  const tab = allTabs()[n - 1];
+  if (tab) activateTab(tab.id);
 }
 
 export function installInputHandlers(klimt) {
@@ -169,13 +203,38 @@ export function installInputHandlers(klimt) {
 
   document.addEventListener("keydown", (e) => {
     if ((e.key === "t" || e.key === "T") && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      if (e.target === input && input.value) return;
+      e.preventDefault();
+      createNewTab();
+      return;
+    }
+
+    if ((e.key === "w" || e.key === "W") && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      closeLocalTab(activeId());
+      return;
+    }
+
+    if (e.key === "Tab" && e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      switchRelative(e.shiftKey ? -1 : 1);
+      return;
+    }
+
+    if (e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey && /^[1-9]$/.test(e.key)) {
+      e.preventDefault();
+      switchNumber(Number(e.key));
+      return;
+    }
+
+    if ((e.key === "r" || e.key === "R") && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
       e.preventDefault();
       document.body.classList.toggle("hide-reasoning");
       return;
     }
 
     if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-      if (working) {
+      if (activeTab().working) {
         e.preventDefault();
         e.stopPropagation();
         interruptWork(klimt);
@@ -186,12 +245,13 @@ export function installInputHandlers(klimt) {
     if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return;
     if (e.key === "j" || e.key === "k") {
       e.preventDefault();
-      const transcript = document.getElementById("transcript");
+      const transcript = document.querySelector(".transcript.active");
       const step = 60;
-      transcript.scrollTop += e.key === "j" ? step : -step;
+      if (transcript) transcript.scrollTop += e.key === "j" ? step : -step;
     }
   }, true);
 
+  window.klimtTabControls = { createNewTab, closeTab };
   resizeInput();
   input.focus();
 }

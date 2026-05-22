@@ -1,6 +1,5 @@
 import { scrollToBottom } from "./transcript.js";
-
-const transcript = document.getElementById("transcript");
+import { transcriptFor } from "./tabs.js";
 
 export function addSelect(ev, submitCommand) {
   const div = document.createElement("div");
@@ -38,7 +37,7 @@ export function addSelect(ev, submitCommand) {
   body.appendChild(select);
   div.appendChild(role);
   div.appendChild(body);
-  transcript.appendChild(div);
+  transcriptFor(ev.tabId).appendChild(div);
   scrollToBottom();
   requestAnimationFrame(() => select.focus());
   setTimeout(() => {

@@ -1,13 +1,23 @@
 import { enhance, renderMarkdown, streamEnhanceKey } from "./render.js";
+import { transcriptFor } from "./tabs.js";
 
-const transcript = document.getElementById("transcript");
+let currentTabId = null;
+
+export function useTranscript(tabId) {
+  currentTabId = tabId;
+}
+
+function transcript() {
+  return transcriptFor(currentTabId);
+}
 
 export function scrollToBottom() {
-  transcript.scrollTop = transcript.scrollHeight;
+  const el = transcript();
+  el.scrollTop = el.scrollHeight;
 }
 
 export function clearTranscript() {
-  transcript.innerHTML = "";
+  transcript().innerHTML = "";
 }
 
 export function escapeMd(text) {
@@ -15,8 +25,6 @@ export function escapeMd(text) {
 }
 
 function codeSpan(text) {
-  // In Markdown tables, `|` still separates cells even inside code spans.
-  // Escape only the table delimiter; leave normal Markdown syntax readable.
   return "`" + String(text ?? "").replace(/\|/g, "\\|") + "`";
 }
 
@@ -25,7 +33,7 @@ export function addBannerLogo() {
   div.className = "startup-mark";
   div.setAttribute("aria-label", "klimt");
   div.textContent = "[|<] klimt";
-  transcript.appendChild(div);
+  transcript().appendChild(div);
   scrollToBottom();
 }
 
@@ -99,7 +107,7 @@ export function addMessage(role, text, { markdown = true } = {}) {
 
   div.appendChild(r);
   div.appendChild(body);
-  transcript.appendChild(div);
+  transcript().appendChild(div);
   scrollToBottom();
   return div;
 }
@@ -138,7 +146,7 @@ export function addTool(name, args, result) {
 
   const r = document.createElement("div");
   r.className = "role";
-  r.textContent = "tool \u00b7 " + name;
+  r.textContent = "tool · " + name;
 
   const body = document.createElement("div");
   body.className = "body";
@@ -166,7 +174,7 @@ export function addTool(name, args, result) {
   body.appendChild(out);
   div.appendChild(r);
   div.appendChild(body);
-  transcript.appendChild(div);
+  transcript().appendChild(div);
   scrollToBottom();
   return div;
 }
@@ -184,7 +192,7 @@ export function startReasoning() {
 
   div.appendChild(r);
   div.appendChild(body);
-  transcript.appendChild(div);
+  transcript().appendChild(div);
   scrollToBottom();
   return {
     div,
@@ -235,7 +243,7 @@ export function startStreaming() {
 
   div.appendChild(r);
   div.appendChild(body);
-  transcript.appendChild(div);
+  transcript().appendChild(div);
   scrollToBottom();
   return {
     div,

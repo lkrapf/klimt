@@ -2,14 +2,28 @@
 
 import { installEventHandler } from "./events.js";
 import { finishWork, installInputHandlers, setInputHistory, submitCommand } from "./input.js";
-import { setContextUsage, setSessionLabel } from "./status.js";
-import { addStartup } from "./transcript.js";
+import { showTabStatus } from "./status.js";
+import { activateTab, activeTab, initializeTabs, installTabs } from "./tabs.js";
+import { addStartup, useTranscript } from "./transcript.js";
 
-const klimt = { pending: null, current: null, suppressUntilDone: false };
+const klimt = {};
 window.klimt = klimt;
 
-installEventHandler(klimt, () => finishWork(klimt), setInputHistory, (command, opts) => submitCommand(klimt, command, opts));
+installEventHandler(
+  klimt,
+  (tab) => finishWork(klimt, tab),
+  setInputHistory,
+  (command, opts) => submitCommand(klimt, command, opts),
+);
 installInputHandlers(klimt);
+installTabs({
+  activate: (tab) => {
+    useTranscript(tab.id);
+    showTabStatus(tab);
+  },
+  close: (tabId) => window.klimtTabControls?.closeTab(tabId),
+  create: () => window.klimtTabControls?.createNewTab(),
+});
 
 let initialized = false;
 
@@ -18,9 +32,11 @@ async function initialize() {
   initialized = true;
   try {
     const info = await window.pywebview.api.info();
-    setSessionLabel(info.model, info.session);
-    setInputHistory(info.input_history);
-    setContextUsage(info.context);
+    initializeTabs(info.tabs, info.active_tab);
+    activateTab(info.active_tab);
+    const tab = activeTab();
+    useTranscript(tab.id);
+    showTabStatus(tab);
     addStartup(info);
   } catch (e) {
     initialized = false;

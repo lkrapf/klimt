@@ -7,6 +7,7 @@ import json
 import os
 import contextlib
 import threading
+import uuid
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -33,24 +34,21 @@ def _new_session() -> ChatSession:
     )
 
 
-class Api:
-    """Exposed to JS via window.pywebview.api.*"""
+class _SingleTabApi:
+    """One independent chat tab. Exposed through the multi-tab Api below."""
 
-    def __init__(self, session: ChatSession) -> None:
+    def __init__(self, session: ChatSession, tab_id: str, emit) -> None:
         self._session = session
-        self._window = None  # set by attach_window
+        self._tab_id = tab_id
+        self._emit_to_window = emit
         self._session_choices: list[dict[str, Any]] = []
         self._busy = False
         self._busy_lock = threading.Lock()
         self._generation = 0
         self._active_base: int | None = None
 
-    def attach_window(self, window) -> None:
-        self._window = window
-
     def _emit(self, event: dict) -> None:
-        payload = json.dumps(event)
-        self._window.evaluate_js(f"window.klimt.handleEvent({payload})")
+        self._emit_to_window(self._tab_id, event)
 
     def _emit_current(self, generation: int, event: dict) -> None:
         with self._busy_lock:
@@ -169,6 +167,9 @@ class Api:
         if command == "/help":
             self._help()
             return True
+        if command == "/hotkeys":
+            self._hotkeys()
+            return True
         if command == "/skills":
             self._skills()
             return True
@@ -247,6 +248,16 @@ class Api:
         self._done()
         return {"ok": True}
 
+    def state(self) -> dict:
+        return {
+            "id": self._tab_id,
+            "model": self._session.model,
+            "session": self._session.session_name,
+            "input_history": self._session.input_history,
+            "context": self._session.context_usage(),
+            "busy": self._is_busy(),
+        }
+
     def info(self) -> dict:
         available_tools = [
             {
@@ -274,6 +285,9 @@ class Api:
 
     def _help(self) -> None:
         self._emit({"type": "text", "content": commands.help_markdown(self._session_help_lines)})
+
+    def _hotkeys(self) -> None:
+        self._emit({"type": "text", "content": commands.hotkeys_markdown()})
 
     @staticmethod
     def _session_help_lines() -> list[str]:
@@ -548,6 +562,92 @@ class Api:
     def _quit(self) -> None:
         """Exit the process immediately."""
         os._exit(0)
+
+
+class Api:
+    """Exposed to JS via window.pywebview.api.*"""
+
+    def __init__(self, session: ChatSession) -> None:
+        self._window = None  # set by attach_window
+        self._tabs_lock = threading.Lock()
+        self._tabs: dict[str, _SingleTabApi] = {}
+        self._first_tab_id = "tab-1"
+        self._tabs[self._first_tab_id] = _SingleTabApi(session, self._first_tab_id, self._emit)
+
+    def attach_window(self, window) -> None:
+        self._window = window
+
+    def _emit(self, tab_id: str, event: dict) -> None:
+        if self._window is None:
+            return
+        payload = json.dumps({**event, "tabId": tab_id})
+        self._window.evaluate_js(f"window.klimt.handleEvent({payload})")
+
+    def _tab(self, tab_id: str | None) -> _SingleTabApi:
+        with self._tabs_lock:
+            if tab_id and tab_id in self._tabs:
+                return self._tabs[tab_id]
+            return self._tabs[self._first_tab_id]
+
+    def info(self) -> dict:
+        available_tools = [
+            {
+                "name": schema.get("function", {}).get("name", ""),
+                "description": schema.get("function", {}).get("description", ""),
+            }
+            for schema in tools.SCHEMAS
+        ]
+        with self._tabs_lock:
+            tab_states = [tab.state() for tab in self._tabs.values()]
+        first = self._tab(self._first_tab_id).state()
+        return {
+            "version": __version__,
+            "model": first["model"],
+            "models": list_model_names(),
+            "session": first["session"],
+            "input_history": first["input_history"],
+            "context": first["context"],
+            "skills": skills.list_skills(),
+            "commands": [
+                {"usage": usage, "description": description}
+                for usage, description in commands.command_rows()
+            ],
+            "available_tools": available_tools,
+            "tools": available_tools,
+            "tabs": tab_states,
+            "active_tab": self._first_tab_id,
+        }
+
+    def send(self, text: str, tab_id: str | None = None) -> dict:
+        return self._tab(tab_id).send(text)
+
+    def interrupt(self, tab_id: str | None = None) -> dict:
+        return self._tab(tab_id).interrupt()
+
+    def new_tab(self) -> dict:
+        with self._tabs_lock:
+            tab_id = "tab-" + uuid.uuid4().hex[:8]
+            self._tabs[tab_id] = _SingleTabApi(_new_session(), tab_id, self._emit)
+            return {"ok": True, "tab": self._tabs[tab_id].state()}
+
+    def close_tab(self, tab_id: str) -> dict:
+        with self._tabs_lock:
+            if tab_id not in self._tabs:
+                return {"ok": False, "error": "unknown tab"}
+            if len(self._tabs) <= 1:
+                return {"ok": False, "error": "cannot close last tab"}
+            tab = self._tabs[tab_id]
+            if tab._is_busy():
+                return {"ok": False, "error": "cannot close a busy tab; press Esc to interrupt it first"}
+            self._tabs.pop(tab_id)
+            if tab_id == self._first_tab_id:
+                self._first_tab_id = next(iter(self._tabs))
+        tab.interrupt()
+        return {"ok": True, "active_tab": self._first_tab_id}
+
+    def tabs(self) -> dict:
+        with self._tabs_lock:
+            return {"tabs": [tab.state() for tab in self._tabs.values()], "active_tab": self._first_tab_id}
 
 
 def _set_macos_icon() -> None:

@@ -33,16 +33,21 @@
 <body>
   <header id="topbar">
     <span id="title" aria-label="klimt">[|&lt;]</span>
-    <span id="model" class="muted"></span>
-    <span id="context" class="muted context"></span>
-    <span id="status" class="muted status" aria-live="polite"></span>
+    <nav id="tabs" aria-label="tabs"></nav>
+    <button id="new-tab" type="button" title="new tab (Ctrl+T)">+</button>
   </header>
 
-  <main id="transcript" aria-live="polite"></main>
+  <div id="transcripts"></div>
 
   <footer id="composer">
     <textarea id="input" rows="1"></textarea>
   </footer>
+
+  <section id="active-status" aria-live="polite">
+    <span id="model" class="muted"></span>
+    <span id="context" class="muted context"></span>
+    <span id="status" class="muted status"></span>
+  </section>
 
   <script type="module" src="app.js"></script>
 </body>
