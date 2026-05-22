@@ -23,6 +23,10 @@ export function setWorking(on) {
 
 export function finishWork(klimt) {
   if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
+  if (klimt.reasoning) {
+    klimt.reasoning.div?.classList.remove("streaming");
+    klimt.reasoning = null;
+  }
   if (klimt.current) {
     finalizeStreaming(klimt.current);
     klimt.current = null;
@@ -130,6 +134,12 @@ export function installInputHandlers(klimt) {
   });
 
   document.addEventListener("keydown", (e) => {
+    if ((e.key === "t" || e.key === "T") && e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      document.body.classList.toggle("hide-reasoning");
+      return;
+    }
+
     if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
       if (working) {
         e.preventDefault();

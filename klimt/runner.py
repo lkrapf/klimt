@@ -34,7 +34,10 @@ def run_turn(
         stream = provider.stream(
             messages=[
                 {"role": "system", "content": system},
-                *[{k: v for k, v in m.items() if k != "usage"} for m in history],
+                *[
+                    {k: v for k, v in m.items() if k not in {"usage", "reasoning"}}
+                    for m in history
+                ],
             ],
             tool_schemas=tools.SCHEMAS,
             max_completion_tokens=max_tokens,
@@ -43,8 +46,10 @@ def run_turn(
             active_stream_ref["stream"] = stream
 
         content_buf: List[str] = []
+        reasoning_buf: List[str] = []
         tool_calls: Dict[int, Dict[str, str]] = {}
         text_open = False
+        reasoning_open = False
         usage = None
 
         try:
@@ -59,7 +64,18 @@ def run_turn(
                 if delta is None:
                     continue
 
+                reasoning_delta = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+                if reasoning_delta:
+                    if not reasoning_open:
+                        emit({"type": "reasoning_start"})
+                        reasoning_open = True
+                    emit({"type": "reasoning_delta", "content": reasoning_delta})
+                    reasoning_buf.append(reasoning_delta)
+
                 if delta.content:
+                    if reasoning_open:
+                        emit({"type": "reasoning_end"})
+                        reasoning_open = False
                     if not text_open:
                         emit({"type": "text_start"})
                         text_open = True
@@ -87,19 +103,27 @@ def run_turn(
                     active_stream_ref["stream"] = None
 
         if cancel.is_set():
+            if reasoning_open:
+                emit({"type": "reasoning_end"})
             if text_open:
                 emit({"type": "text_end"})
             emit({"type": "error", "message": "interrupted"})
             return False
 
+        if reasoning_open:
+            emit({"type": "reasoning_end"})
+
         if text_open:
             emit({"type": "text_end"})
 
         full_text = "".join(content_buf)
+        full_reasoning = "".join(reasoning_buf)
         assistant_entry: Dict[str, Any] = {
             "role": "assistant",
             "content": full_text or None,
         }
+        if full_reasoning:
+            assistant_entry["reasoning"] = full_reasoning
         if usage:
             assistant_entry["usage"] = _usage_dict(usage)
         if tool_calls:

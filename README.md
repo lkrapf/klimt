@@ -66,7 +66,6 @@ Optional env:
 
 - `AZURE_OPENAI_API_VERSION` — defaults to `2024-10-21`
 - `KLIMT_MODEL` — override the default deployment name used for new sessions
-- `KLIMT_SYSTEM` — system prompt
 - `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator. If unset, Klimt hides the percentage because Azure does not expose this reliably via the chat API.
 - `KLIMT_DEBUG=1` — enables the webview devtools
 
@@ -108,11 +107,23 @@ The top bar shows `working...` while a request is still running and displays app
 - `/skills` — list available skills with short descriptions.
 - `/compact [N]` — compact older context into structured state, keeping the last N history messages raw (default 8).
 - `/model [name]` — show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`.
-- `/reload` — reload `~/.klimt/AGENTS.md`, skill discovery, `tools.py`, Azure client config, and CSS.
+- `/reload` — reload prompt layers (`~/.klimt/AGENTS.md` and project `AGENTS.md` files), skill discovery, `tools.py`, model config, and CSS.
 - `/resume [name]` — resume a saved session for this folder.
 - `/name <name>` — name the current session.
 - `/quit` — close Klimt.
 - `/<skill>` — load `~/.klimt/skills/<skill>/SKILL.md` into the conversation.
+
+## Prompt layering
+
+Klimt assembles the system prompt in layers:
+
+1. **Kernel** — harness/tool protocol and instruction hierarchy from `klimt/KERNEL.md`.
+2. **Runtime manifests** — currently available tools and discovered skills.
+3. **Project instructions** — `AGENTS.md` files from the current working tree, outermost first.
+4. **Global profile** — `~/.klimt/AGENTS.md`.
+5. **Current request** — the user turn.
+
+Project instructions may specialize the global profile. Nothing below the kernel may redefine tool behavior or harness safety boundaries.
 
 ## Architecture
 

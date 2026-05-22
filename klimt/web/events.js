@@ -2,9 +2,13 @@ import { reloadCss, setContextUsage, setSessionLabel } from "./status.js";
 import {
   addMessage,
   addTool,
+  addReasoning,
   appendDelta,
+  appendReasoningDelta,
   clearTranscript,
+  finalizeReasoning,
   finalizeStreaming,
+  startReasoning,
   startStreaming,
 } from "./transcript.js";
 
@@ -14,7 +18,27 @@ export function installEventHandler(klimt, finishWork, setInputHistory) {
     if (klimt.pending) { klimt.pending.remove(); klimt.pending = null; }
 
     switch (ev.type) {
+      case "reasoning_start":
+        klimt.reasoning = startReasoning();
+        break;
+      case "reasoning_delta":
+        if (!klimt.reasoning) klimt.reasoning = startReasoning();
+        appendReasoningDelta(klimt.reasoning, ev.content);
+        break;
+      case "reasoning_end":
+        if (klimt.reasoning) {
+          finalizeReasoning(klimt.reasoning);
+          klimt.reasoning = null;
+        }
+        break;
+      case "reasoning":
+        addReasoning(ev.content || "");
+        break;
       case "text_start":
+        if (klimt.reasoning) {
+          finalizeReasoning(klimt.reasoning);
+          klimt.reasoning = null;
+        }
         klimt.current = startStreaming();
         break;
       case "text_delta":
@@ -38,6 +62,7 @@ export function installEventHandler(klimt, finishWork, setInputHistory) {
       case "clear":
         clearTranscript();
         klimt.current = null;
+        klimt.reasoning = null;
         klimt.pending = null;
         break;
       case "input_history":
@@ -50,6 +75,10 @@ export function installEventHandler(klimt, finishWork, setInputHistory) {
         setContextUsage(ev);
         break;
       case "tool":
+        if (klimt.reasoning) {
+          finalizeReasoning(klimt.reasoning);
+          klimt.reasoning = null;
+        }
         if (klimt.current) {
           finalizeStreaming(klimt.current);
           klimt.current = null;

@@ -76,7 +76,7 @@ Handled in `ChatSession.send` before any model call:
 - `/name` — loads `~/.klimt/skills/<name>/SKILL.md` and appends its body to
   history as a user message. Match is by directory name, then by frontmatter
   `name:`. No model call.
-- `/reload` — reloads `~/.klimt/AGENTS.md`, skill discovery, `tools.py`, the
+- `/reload` — reloads prompt layers, skill discovery, `tools.py`, the
   Azure client/model config, and asks the frontend to cache-bust `style.css`.
   No model call. Conversation history is kept.
 
@@ -99,10 +99,19 @@ The model has three tools: `read(path)`, `write(path, content)`, `bash(command)`
   back, repeat until the model returns a plain text answer.
 - `text_select=True` is required on `create_window` or selection is dead.
 
-## System prompt
+## Prompt layering
 
-Loaded at startup from `~/.klimt/AGENTS.md`. Override with the `KLIMT_SYSTEM`
-env var. If the file is missing we log a warning and run with no system prompt.
+`klimt/prompt.py` assembles the system prompt in layers:
+
+1. kernel/harness protocol from `klimt/KERNEL.md`;
+2. generated tool and skill manifests;
+3. global profile from `~/.klimt/AGENTS.md`;
+4. project `AGENTS.md` files from the current working tree, outermost first.
+
+The kernel is intentionally not persona-specific. Keep Claudette/Lars/tone-style
+instructions in the global profile, not in the kernel. Project instructions may
+specialize the global profile but must not redefine tool behavior or harness
+safety boundaries.
 
 ## When adding features
 

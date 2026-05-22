@@ -122,6 +122,13 @@ function summarizeArgs(name, args) {
   try { return JSON.stringify(args); } catch (_) { return String(args); }
 }
 
+export function addReasoning(text, { done = true } = {}) {
+  const h = startReasoning();
+  appendReasoningDelta(h, text);
+  if (done) finalizeReasoning(h);
+  return h.div;
+}
+
 export function addTool(name, args, result) {
   const div = document.createElement("div");
   div.className = "msg tool";
@@ -159,6 +166,57 @@ export function addTool(name, args, result) {
   transcript.appendChild(div);
   scrollToBottom();
   return div;
+}
+
+export function startReasoning() {
+  const div = document.createElement("div");
+  div.className = "msg reasoning streaming";
+
+  const r = document.createElement("div");
+  r.className = "role";
+  r.textContent = "reasoning";
+
+  const body = document.createElement("pre");
+  body.className = "body reasoning-body";
+
+  div.appendChild(r);
+  div.appendChild(body);
+  transcript.appendChild(div);
+  scrollToBottom();
+  return {
+    div,
+    body,
+    raw: "",
+    pending: false,
+    raf: null,
+    done: false,
+  };
+}
+
+export function appendReasoningDelta(h, txt) {
+  if (h.done) return;
+  h.raw += txt;
+  if (h.pending) return;
+  h.pending = true;
+  h.raf = requestAnimationFrame(() => {
+    h.raf = null;
+    h.pending = false;
+    if (h.done) return;
+    h.body.textContent = h.raw;
+    scrollToBottom();
+  });
+}
+
+export function finalizeReasoning(h) {
+  h.done = true;
+  h.pending = false;
+  if (h.raf !== null) {
+    cancelAnimationFrame(h.raf);
+    h.raf = null;
+  }
+  h.body.textContent = h.raw;
+  h.div.classList.remove("streaming");
+  scrollToBottom();
 }
 
 export function startStreaming() {

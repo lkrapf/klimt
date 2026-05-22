@@ -8,77 +8,21 @@ import os
 import contextlib
 import threading
 from datetime import datetime
-from html import escape as xml_escape
 from pathlib import Path
 from typing import Any
 
 import webview
 
-from . import __version__, commands, skills, tools
+from . import __version__, commands, prompt, skills, tools
 from .api import ChatSession
 from .model_config import default_model_name, list_model_configs, list_model_names
 
 WEB_DIR = Path(__file__).parent / "web"
 ASSETS_DIR = Path(__file__).parent / "assets"
 ICON_PATH = ASSETS_DIR / "klimt-icon.png"
-SYSTEM_PROMPT_PATH = Path.home() / ".klimt" / "AGENTS.md"
-
 
 def _build_system_prompt() -> str:
-    base = os.environ.get("KLIMT_SYSTEM")
-    if base is None:
-        try:
-            base = SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            base = ""
-
-    lines = [
-        "",
-        "## Available tools",
-        "",
-    ]
-    for schema in tools.SCHEMAS:
-        fn = schema.get("function", {})
-        name = str(fn.get("name") or "")
-        desc = str(fn.get("description") or "")
-        lines.append(f"- `{name}` — {desc}")
-
-    lines.extend([
-        "",
-        "Guidelines:",
-        "- Use bash for file operations like ls, rg, find.",
-        "- Use read to examine files instead of cat or sed.",
-        "- Use edit for precise changes; edits[].oldText must match exactly, uniquely, and non-overlappingly.",
-        "- When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls.",
-        "- Each edits[].oldText is matched against the original file, not after earlier edits are applied. Do not emit overlapping or nested edits. Merge nearby changes into one edit.",
-        "- Keep edits[].oldText as small as possible while still being unique in the file. Do not pad with large unchanged regions.",
-        "- Use write only for new files or complete rewrites.",
-        "",
-    ])
-
-    items = skills.list_skills()
-    if items:
-        lines.extend([
-            "The following skills provide specialized instructions for specific tasks.",
-            "Use the read tool to load a skill's file when the task matches its description.",
-            "When a skill file references a relative path, resolve it against the skill directory (parent of SKILL.md / dirname of the path) and use that absolute path in tool commands.",
-            "",
-            "<available_skills>",
-        ])
-        for s in items:
-            name = xml_escape(str(s.get("name") or ""))
-            desc = xml_escape(str(s.get("description") or "(no description)"))
-            location = xml_escape(str(Path(s.get("path") or "").expanduser().resolve()))
-            lines.extend([
-                "  <skill>",
-                f"    <name>{name}</name>",
-                f"    <description>{desc}</description>",
-                f"    <location>{location}</location>",
-                "  </skill>",
-            ])
-        lines.append("</available_skills>")
-
-    return base + "\n".join(lines) + "\n"
+    return prompt.build_system_prompt(tools.SCHEMAS, skills.list_skills())
 
 
 def _new_session() -> ChatSession:
@@ -130,6 +74,9 @@ class Api:
                 replay_role = "system" if content.startswith("[Klimt compacted prior context") else "user"
                 self._emit({"type": "message", "role": replay_role, "content": content})
             elif role == "assistant":
+                reasoning = msg.get("reasoning")
+                if reasoning:
+                    self._emit({"type": "reasoning", "content": reasoning})
                 content = msg.get("content")
                 if content:
                     self._emit({"type": "message", "role": "assistant", "content": content})
@@ -588,7 +535,8 @@ class Api:
         self._emit({"type": "text", "content": f"model set to **{self._md_escape(requested)}**"})
 
     def _reload(self) -> None:
-        """Reload local config, skill/tool modules, model config, and CSS."""
+        """Reload local config, prompt layers, skill/tool modules, model config, and CSS."""
+        importlib.reload(prompt)
         importlib.reload(skills)
         importlib.reload(tools)
         self._session.system = _build_system_prompt()
