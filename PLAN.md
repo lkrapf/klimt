@@ -25,4 +25,3 @@ roadmap theater.
 ## Packaging
 
 - [ ] Add proper Python packaging so users do not need to run from a checkout.
-- [ ] Document Linux `pywebview` system dependencies once tested.

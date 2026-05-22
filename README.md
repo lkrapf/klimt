@@ -8,9 +8,7 @@ Anthropic through Anthropic's OpenAI-compatible endpoint.
 ## Requirements
 
 - Python 3.10+
-- A working GUI environment for `pywebview`
-  - macOS works through WebKit.
-  - Linux may need GTK/WebKit packages installed by the OS package manager.
+- A working GUI environment for `pywebview`.
 - One configured model endpoint.
 
 Install from a checkout:
