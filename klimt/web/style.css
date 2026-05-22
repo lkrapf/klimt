@@ -161,9 +161,12 @@ body.working .status::after {
 .transcript {
   overflow-y: auto;
   overflow-x: hidden;
+  scrollbar-gutter: stable;
   min-height: 0;
   height: 100%;
-  padding: 14px 12px;
+  /* right padding compensates for the 10px scrollbar gutter so the
+     visible message edge lines up with the topbar/composer/status. */
+  padding: 14px 2px 14px 12px;
   display: none;
   flex-direction: column;
   gap: 14px;
