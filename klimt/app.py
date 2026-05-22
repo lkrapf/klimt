@@ -30,7 +30,6 @@ def _new_session() -> ChatSession:
     return ChatSession(
         model=default_model_name(),
         system=_build_system_prompt(),
-        context_window=int(os.environ.get("KLIMT_CONTEXT_WINDOW", "128000")),
     )
 
 
@@ -553,7 +552,6 @@ class _SingleTabApi:
         importlib.reload(skills)
         importlib.reload(tools)
         self._session.system = _build_system_prompt()
-        self._session.context_window = int(os.environ.get("KLIMT_CONTEXT_WINDOW", "128000"))
         self._session.reload_client()
         self._emit({"type": "reload_css"})
         self._sync_input_history()

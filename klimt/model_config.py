@@ -28,6 +28,7 @@ class ModelConfig:
     base_url: str = ""
     api_version: str = ""
     api_key_env: str = ""
+    context_window: int = 0
 
     def provider_model(self) -> str:
         return self.model or self.name
@@ -55,6 +56,11 @@ def _item_to_config(item: Any) -> ModelConfig | None:
     if not name:
         return None
 
+    try:
+        context_window = int(item.get("context_window") or 0)
+    except (TypeError, ValueError):
+        context_window = 0
+
     return ModelConfig(
         name=name,
         provider=provider,
@@ -62,6 +68,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         base_url=str(item.get("base_url") or item.get("endpoint") or "").strip(),
         api_version=str(item.get("api_version") or "").strip(),
         api_key_env=str(item.get("api_key_env") or "").strip(),
+        context_window=max(0, context_window),
     )
 
 

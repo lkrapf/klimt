@@ -141,7 +141,6 @@ class ChatSession:
     model: str
     system: str
     max_tokens: int = 4096
-    context_window: int = 0
     history: List[Dict] = field(default_factory=list)
     session_name: str = field(default_factory=random_session_name)
     input_history: List[str] = field(default_factory=list)
@@ -228,17 +227,18 @@ class ChatSession:
         messages.extend(self.history)
         estimate = _estimate_context_tokens(messages)
 
-        if self.context_window <= 0:
+        window = self.model_config().context_window
+        if window <= 0:
             return {
                 "tokens": estimate["tokens"],
                 "contextWindow": 0,
                 "percent": None,
             }
 
-        percent = (estimate["tokens"] / self.context_window) * 100
+        percent = (estimate["tokens"] / window) * 100
         return {
             "tokens": estimate["tokens"],
-            "contextWindow": self.context_window,
+            "contextWindow": window,
             "percent": percent,
         }
 

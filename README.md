@@ -54,9 +54,11 @@ Optional env:
 
 - `KLIMT_MODEL` — default model selector for new sessions; must name an entry in
   `~/.klimt/models.json`.
-- `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator;
-  defaults to `128000`.
 - `KLIMT_DEBUG=1` — enables webview devtools.
+
+The top-bar usage indicator uses the active model's `context_window` from
+`~/.klimt/models.json`. If omitted, the bar shows a token count without a
+percentage.
 
 ## Model configuration
 
@@ -90,7 +92,8 @@ after `/model`. `model` or `deployment` is what Klimt sends to the provider.
       "name": "claude",
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
-      "api_key_env": "ANTHROPIC_AUTH_TOKEN"
+      "api_key_env": "ANTHROPIC_AUTH_TOKEN",
+      "context_window": 200000
     }
   ]
 }
