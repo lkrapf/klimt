@@ -22,7 +22,7 @@ roadmap theater.
   - [ ] Prefer summaries or selected quotes over ambient tab-to-tab chat.
 - [ ] Add optional per-tab instruction overlays / agent presets.
 - [x] Show model/session select boxes only when `/model` or `/session` is invoked.
-- [ ] Vendor static copies of frontend dependencies instead of loading them from CDNs.
+- [x] Vendor static copies of frontend dependencies instead of loading them from CDNs.
 - [x] Support Anthropic Claude Code OAuth token auth; do not support Claude web session-cookie auth.
 
 ## Agent architecture
