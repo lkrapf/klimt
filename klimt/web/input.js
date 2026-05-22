@@ -1,4 +1,4 @@
-import { setWorking as setWorkingStatus } from "./status.js";
+import { setQueueCount, setWorking as setWorkingStatus } from "./status.js";
 import { addMessage, addPending, finalizeStreaming } from "./transcript.js";
 
 const input = document.getElementById("input");
@@ -6,6 +6,7 @@ let inputHistory = [];
 let historyPos = null;
 let historyDraft = "";
 let working = false;
+let queue = [];
 
 export function setInputHistory(items) {
   inputHistory = Array.isArray(items) ? items.slice() : [];
@@ -33,6 +34,7 @@ export function finishWork(klimt) {
   }
   setWorking(false);
   input.focus();
+  runNextQueued(klimt);
 }
 
 function resizeInput() {
@@ -75,18 +77,44 @@ function navigateHistory(delta) {
 function interruptWork(klimt) {
   if (!working) return;
 
+  clearQueued();
   klimt.suppressUntilDone = true;
   finishWork(klimt);
-  addMessage("system", "_interrupted_");
+  addMessage("system", "_interrupted_ queued messages cleared_");
 
   window.pywebview.api.interrupt().catch((e) => {
     addMessage("error", "**Bridge error:** " + (e?.message || e));
   });
 }
 
+function clearQueued() {
+  for (const item of queue) item.pending?.remove();
+  queue = [];
+  setQueueCount(0);
+}
+
+function queueCommand(klimt, text, echo) {
+  rememberInput(text);
+  setInputValue("");
+  if (echo) addMessage("user", text, { markdown: false });
+  const pending = addPending("queued");
+  queue.push({ text, echo: false, pending });
+  setQueueCount(queue.length);
+  return true;
+}
+
+function runNextQueued(klimt) {
+  if (working || klimt.suppressUntilDone || !queue.length) return;
+  const item = queue.shift();
+  item.pending?.remove();
+  setQueueCount(queue.length);
+  submitCommand(klimt, item.text, { echo: item.echo });
+}
+
 export async function submitCommand(klimt, text, { echo = true } = {}) {
   text = String(text ?? "").trim();
-  if (!text || working) return false;
+  if (!text) return false;
+  if (working) return queueCommand(klimt, text, echo);
 
   rememberInput(text);
   setInputValue("");

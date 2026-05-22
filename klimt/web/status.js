@@ -2,6 +2,9 @@ const modelLabel = document.getElementById("model");
 const statusLabel = document.getElementById("status");
 const contextLabel = document.getElementById("context");
 
+let working = false;
+let queueCount = 0;
+
 function formatTokens(n) {
   if (n === null || n === undefined) return "?";
   if (n < 1000) return String(n);
@@ -36,12 +39,25 @@ export function setSessionLabel(model, name) {
   modelLabel.textContent = [modelLabel.dataset.model, name].filter(Boolean).join(" · ");
 }
 
+function updateStatus() {
+  if (working) {
+    statusLabel.textContent = queueCount ? `working... ${queueCount} queued` : "working...";
+  } else {
+    statusLabel.textContent = queueCount ? `${queueCount} queued` : "";
+  }
+}
+
 export function setWorking(on) {
-  const working = Boolean(on);
+  working = Boolean(on);
   document.body.classList.toggle("working", working);
   document.body.setAttribute("aria-busy", working ? "true" : "false");
-  statusLabel.textContent = working ? "working..." : "";
+  updateStatus();
   return working;
+}
+
+export function setQueueCount(count) {
+  queueCount = Math.max(0, Number(count) || 0);
+  updateStatus();
 }
 
 export function reloadCss() {

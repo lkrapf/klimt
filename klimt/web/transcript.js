@@ -104,11 +104,14 @@ export function addMessage(role, text, { markdown = true } = {}) {
   return div;
 }
 
-export function addPending() {
+export function addPending(label = "thinking") {
   const div = addMessage("assistant", "", { markdown: false });
   div.classList.add("pending");
   const body = div.querySelector(".body");
-  body.innerHTML = '<span class="thinking">thinking</span>';
+  const span = document.createElement("span");
+  span.className = "thinking";
+  span.textContent = label;
+  body.replaceChildren(span);
   scrollToBottom();
   requestAnimationFrame(scrollToBottom);
   return div;

@@ -5,7 +5,7 @@ roadmap theater.
 
 ## Near term
 
-- [ ] Queue user messages submitted while a request is active.
+- [x] Queue user messages submitted while a request is active.
 - [ ] Add a session tree / branching model instead of only linear named sessions.
 - [ ] Add multi-tab or parallel invocation support.
 - [x] Show model/session select boxes only when `/model` or `/session` is invoked.
