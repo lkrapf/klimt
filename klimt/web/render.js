@@ -14,27 +14,118 @@ function escapeHtml(s) {
     .replaceAll("'", "&#39;");
 }
 
-function protectDisplayMath(src) {
-  const blocks = [];
-  const text = (src ?? "").replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]/g, (match) => {
-    const token = `\uE000KLIMT_MATH_${blocks.length}\uE000`;
-    blocks.push(match);
-    return token;
-  });
-  return { text, blocks };
+function isEscaped(src, pos) {
+  let slashes = 0;
+  for (let i = pos - 1; i >= 0 && src[i] === "\\"; i--) slashes += 1;
+  return slashes % 2 !== 0;
 }
 
-function restoreDisplayMath(html, blocks) {
-  return blocks.reduce(
-    (out, block, i) => out.replaceAll(`\uE000KLIMT_MATH_${i}\uE000`, escapeHtml(block)),
-    html,
-  );
+function findUnescaped(src, token, start) {
+  let pos = start;
+  while (true) {
+    const i = src.indexOf(token, pos);
+    if (i < 0) return -1;
+    if (!isEscaped(src, i)) return i;
+    pos = i + token.length;
+  }
+}
+
+function backtickRunLength(src, pos) {
+  let len = 0;
+  while (src[pos + len] === "`") len += 1;
+  return len;
+}
+
+function fenceMarker(line) {
+  const m = line.match(/^ {0,3}(`{3,}|~{3,})/);
+  return m ? { char: m[1][0], len: m[1].length } : null;
+}
+
+function isClosingFence(line, fence) {
+  const m = fenceMarker(line);
+  return Boolean(m && m.char === fence.char && m.len >= fence.len);
+}
+
+function protectMathInText(src) {
+  let out = "";
+  let pos = 0;
+
+  while (pos < src.length) {
+    if (src[pos] === "`") {
+      const ticks = backtickRunLength(src, pos);
+      const marker = "`".repeat(ticks);
+      const end = src.indexOf(marker, pos + ticks);
+      if (end < 0) {
+        out += src.slice(pos);
+        break;
+      }
+      out += src.slice(pos, end + ticks);
+      pos = end + ticks;
+      continue;
+    }
+
+    const open = src.startsWith("$$", pos) && !isEscaped(src, pos) ? "$$"
+      : src.startsWith("\\[", pos) && !isEscaped(src, pos) ? "\\["
+      : null;
+    if (open) {
+      const close = open === "$$" ? "$$" : "\\]";
+      const end = findUnescaped(src, close, pos + open.length);
+      if (end >= 0) {
+        const math = src.slice(pos, end + close.length);
+        out += `<div class="klimt-display-math">${escapeHtml(math)}</div>`;
+        pos = end + close.length;
+        continue;
+      }
+    }
+
+    out += src[pos];
+    pos += 1;
+  }
+
+  return out;
+}
+
+function protectDisplayMath(src) {
+  let text = "";
+  let prose = "";
+  let fence = null;
+  let pos = 0;
+
+  function flushProse() {
+    if (!prose) return;
+    text += protectMathInText(prose);
+    prose = "";
+  }
+
+  while (pos < src.length) {
+    const newline = src.indexOf("\n", pos);
+    const line = newline < 0 ? src.slice(pos) : src.slice(pos, newline + 1);
+
+    if (fence) {
+      text += line;
+      if (isClosingFence(line, fence)) fence = null;
+    } else {
+      const marker = fenceMarker(line);
+      if (marker) {
+        flushProse();
+        text += line;
+        fence = marker;
+      } else {
+        prose += line;
+      }
+    }
+
+    if (newline < 0) break;
+    pos = newline + 1;
+  }
+
+  flushProse();
+  return text;
 }
 
 export function renderMarkdown(src) {
-  const { text, blocks } = protectDisplayMath(autoCloseFences(src ?? ""));
-  const html = DOMPurify.sanitize(marked.parse(text), SANITIZE_OPTS);
-  return restoreDisplayMath(html, blocks);
+  const text = protectDisplayMath(autoCloseFences(src ?? ""));
+  return DOMPurify.sanitize(marked.parse(text), SANITIZE_OPTS);
 }
 
 function autoCloseFences(s) {
