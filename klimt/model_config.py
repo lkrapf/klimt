@@ -27,26 +27,20 @@ class ModelConfig:
     model: str = ""
     base_url: str = ""
     api_version: str = ""
-    api_key: str = ""
     api_key_env: str = ""
 
     def provider_model(self) -> str:
         return self.model or self.name
 
     def resolved_api_key(self) -> str:
-        if self.api_key:
-            return self.api_key
         if self.api_key_env:
             return os.environ[self.api_key_env]
-        if self.provider == "anthropic":
-            return os.environ["ANTHROPIC_API_KEY"]
-        return os.environ.get("OPENAI_API_KEY") or os.environ.get("AZURE_OPENAI_API_KEY") or "ollama"
+        if self.provider == "ollama":
+            return "ollama"
+        raise ValueError(f"model {self.name!r} requires api_key_env")
 
 
 def _item_to_config(item: Any) -> ModelConfig | None:
-    if isinstance(item, str):
-        name = item.strip()
-        return ModelConfig(name=name, model=name) if name else None
     if not isinstance(item, dict):
         return None
 
@@ -67,7 +61,6 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         model=model or name,
         base_url=str(item.get("base_url") or item.get("endpoint") or "").strip(),
         api_version=str(item.get("api_version") or "").strip(),
-        api_key=str(item.get("api_key") or "").strip(),
         api_key_env=str(item.get("api_key_env") or "").strip(),
     )
 
@@ -100,7 +93,17 @@ def list_model_names() -> list[str]:
 
 def default_model_name() -> str:
     configured = list_model_configs()
-    return os.environ.get("KLIMT_MODEL") or (configured[0].name if configured else os.environ["AZURE_OPENAI_DEPLOYMENT"])
+    if not configured:
+        raise RuntimeError(f"no models configured; create {MODELS_PATH}")
+
+    preferred = os.environ.get("KLIMT_MODEL", "").strip()
+    if not preferred:
+        return configured[0].name
+
+    for cfg in configured:
+        if preferred in {cfg.name, cfg.model}:
+            return cfg.name
+    raise KeyError(f"KLIMT_MODEL={preferred!r} is not configured in {MODELS_PATH}")
 
 
 def resolve_model_config(name: str) -> ModelConfig:
@@ -108,17 +111,4 @@ def resolve_model_config(name: str) -> ModelConfig:
     for cfg in list_model_configs():
         if requested in {cfg.name, cfg.model}:
             return cfg
-
-    # Backward-compatible env-only Azure config.
-    deployment = os.environ.get("KLIMT_MODEL") or os.environ.get("AZURE_OPENAI_DEPLOYMENT")
-    if requested == deployment:
-        return ModelConfig(
-            name=requested,
-            provider="azure",
-            model=requested,
-            base_url=os.environ.get("AZURE_OPENAI_BASE_URL", ""),
-            api_version=os.environ.get("AZURE_OPENAI_API_VERSION", "2024-10-21"),
-            api_key_env="AZURE_OPENAI_API_KEY",
-        )
-
     raise KeyError(requested)

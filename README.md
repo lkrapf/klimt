@@ -25,37 +25,43 @@ python3 -m klimt
 Running with `python3 -m klimt` assumes you are in the repository checkout. If you
 want a packaged install, add packaging first; Klimt does not currently ship one.
 
-## Quick start: Azure via environment
+## Quick start
 
-The simplest configuration is the Azure OpenAI env-only path:
+Create `~/.klimt/models.json` with at least one model endpoint, then start Klimt:
 
 ```bash
-export AZURE_OPENAI_BASE_URL=https://<your-resource>.openai.azure.com
+mkdir -p ~/.klimt
+cat > ~/.klimt/models.json <<'JSON'
+{
+  "models": [
+    {
+      "name": "azure-4.1",
+      "provider": "azure",
+      "deployment": "gpt-4.1",
+      "base_url": "https://your-resource.openai.azure.com",
+      "api_version": "2024-10-21",
+      "api_key_env": "AZURE_OPENAI_API_KEY"
+    }
+  ]
+}
+JSON
+
 export AZURE_OPENAI_API_KEY=...
-export AZURE_OPENAI_DEPLOYMENT=<your-deployment-name>
 python3 -m klimt
 ```
 
-Optional Azure/default-model env:
+Optional env:
 
-- `AZURE_OPENAI_API_VERSION` — defaults to `2024-10-21`.
-- `KLIMT_MODEL` — default model selector for new sessions.
+- `KLIMT_MODEL` — default model selector for new sessions; must name an entry in
+  `~/.klimt/models.json`.
 - `KLIMT_CONTEXT_WINDOW` — context window used for the top-bar usage indicator;
   defaults to `128000`.
 - `KLIMT_DEBUG=1` — enables webview devtools.
 
 ## Model configuration
 
-For multiple selectable endpoints, create `~/.klimt/models.json`.
-
-A plain string is treated as an Azure deployment name:
-
-```json
-["gpt-4.1", "o3"]
-```
-
-For explicit endpoints, use objects. `name` is what you type after `/model`.
-`model` or `deployment` is what Klimt sends to the provider.
+Model endpoints are objects in `~/.klimt/models.json`. `name` is what you type
+after `/model`. `model` or `deployment` is what Klimt sends to the provider.
 
 ```json
 {
@@ -84,7 +90,7 @@ For explicit endpoints, use objects. `name` is what you type after `/model`.
       "name": "claude",
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
-      "api_key_env": "ANTHROPIC_API_KEY"
+      "api_key_env": "ANTHROPIC_AUTH_TOKEN"
     }
   ]
 }
@@ -97,9 +103,26 @@ Supported `provider` values are:
 - `ollama`
 - `anthropic`
 
+`api_key_env` is the only configured auth mechanism. Do not put secret values in
+`models.json`; put the environment variable name there. Authenticated providers
+(`azure`, `openai`, and `anthropic`) require it. `ollama` does not unless your
+OpenAI-compatible endpoint enforces auth.
+
 `openai` can also point at OpenAI-compatible gateways by setting `base_url` and
-`api_key_env`. Anthropic is currently wired through its OpenAI SDK compatibility
-layer, so native-only Anthropic features are not exposed.
+`api_key_env`. Anthropic API keys use Anthropic's OpenAI SDK compatibility
+layer. Claude Code OAuth tokens (`sk-ant-oat...`) use Anthropic's native Messages
+API with the required Claude Code OAuth headers.
+
+To use a Claude Code subscription OAuth token, generate one with:
+
+```bash
+claude setup-token
+export ANTHROPIC_AUTH_TOKEN=<token>
+```
+
+and set the Anthropic model entry's `api_key_env` to `ANTHROPIC_AUTH_TOKEN`.
+Do not use Claude web session cookies; Klimt only supports API/OAuth-style
+credentials through Anthropic's API endpoint.
 
 ## Global and project instructions
 
