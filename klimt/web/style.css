@@ -406,7 +406,7 @@ body.hide-reasoning .msg.reasoning { display: none; }
   margin: 0.5em 0;
   text-align: center;
 }
-.msg .mermaid svg { max-width: 100%; height: auto; }
+.msg .mermaid svg { max-width: 100%; height: auto; font-size: 11px; }
 .msg .mermaid foreignObject,
 .msg .mermaid foreignObject * {
   box-sizing: content-box;
