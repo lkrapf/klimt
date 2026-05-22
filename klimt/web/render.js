@@ -1,15 +1,43 @@
 marked.setOptions({ gfm: true, breaks: false });
 
-export const SANITIZE_OPTS = {
+const SANITIZE_OPTS = {
   ADD_TAGS: ["foreignObject"],
   ADD_ATTR: ["target"],
 };
 
-export function renderMarkdown(src) {
-  return DOMPurify.sanitize(marked.parse(src ?? ""), SANITIZE_OPTS);
+function escapeHtml(s) {
+  return s
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
-export function autoCloseFences(s) {
+function protectDisplayMath(src) {
+  const blocks = [];
+  const text = (src ?? "").replace(/\$\$[\s\S]*?\$\$|\\\[[\s\S]*?\\\]/g, (match) => {
+    const token = `\uE000KLIMT_MATH_${blocks.length}\uE000`;
+    blocks.push(match);
+    return token;
+  });
+  return { text, blocks };
+}
+
+function restoreDisplayMath(html, blocks) {
+  return blocks.reduce(
+    (out, block, i) => out.replaceAll(`\uE000KLIMT_MATH_${i}\uE000`, escapeHtml(block)),
+    html,
+  );
+}
+
+export function renderMarkdown(src) {
+  const { text, blocks } = protectDisplayMath(autoCloseFences(src ?? ""));
+  const html = DOMPurify.sanitize(marked.parse(text), SANITIZE_OPTS);
+  return restoreDisplayMath(html, blocks);
+}
+
+function autoCloseFences(s) {
   const fences = (s.match(/^```/gm) || []).length;
   return fences % 2 ? s + "\n```" : s;
 }

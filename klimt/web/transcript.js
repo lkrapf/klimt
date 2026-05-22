@@ -1,4 +1,4 @@
-import { autoCloseFences, enhance, renderMarkdown, SANITIZE_OPTS, streamEnhanceKey } from "./render.js";
+import { enhance, renderMarkdown, streamEnhanceKey } from "./render.js";
 
 const transcript = document.getElementById("transcript");
 
@@ -272,10 +272,7 @@ export function appendDelta(h, txt) {
     h.raf = null;
     h.pending = false;
     if (h.done) return;
-    h.body.innerHTML = DOMPurify.sanitize(
-      marked.parse(autoCloseFences(h.raw)),
-      SANITIZE_OPTS,
-    );
+    h.body.innerHTML = renderMarkdown(h.raw);
     h.renderSerial += 1;
     scheduleStreamEnhance(h);
     scrollToBottom();

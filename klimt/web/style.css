@@ -311,7 +311,12 @@ body.hide-reasoning .msg.reasoning { display: none; }
 .msg .mermaid svg { max-width: 100%; height: auto; }
 
 /* KaTeX recolor to amber; kill the bright white default */
-.msg .katex { color: var(--fg); text-shadow: var(--glow); }
+.msg .katex {
+  color: var(--fg);
+  text-shadow: var(--glow);
+  text-transform: none;
+  letter-spacing: normal;
+}
 .msg .katex-display { margin: 0.6em 0; overflow-x: auto; overflow-y: hidden; }
 
 #composer {
