@@ -24,6 +24,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/hotkeys", "/hotkeys", "Show keyboard shortcuts.", "allow"),
     CommandSpec("/skills", "/skills", "List available skills with short descriptions.", "allow"),
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
+    CommandSpec("/cd", "/cd [path]", "Show or change the current working directory for this session."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),
     CommandSpec("/new", "/new", "Start a completely new empty session."),
     CommandSpec("/session", "/session", "Choose a saved session from an interactive selector."),
@@ -117,7 +118,7 @@ def hotkeys_markdown() -> str:
 def run_shell(session: Any, command: str) -> list[dict[str, Any]]:
     if not command:
         return []
-    result = tools.run("bash", {"command": command}, session._cancel)
+    result = tools.run("bash", {"command": command}, session._cancel, session.cwd)
     if not session._cancel.is_set():
         session.history.append({"role": "user", "content": f"$ {command}\n{result}"})
     events: list[dict[str, Any]] = [{

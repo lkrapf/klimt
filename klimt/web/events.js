@@ -1,5 +1,5 @@
 import { addSelect } from "./selectors.js";
-import { reloadCss, setContextUsage, setSessionLabel } from "./status.js";
+import { reloadCss, setContextUsage, setCwd, setSessionLabel } from "./status.js";
 import { getTab, updateTab } from "./tabs.js";
 import {
   addMessage,
@@ -89,6 +89,13 @@ export function installEventHandler(klimt, finishWork, setInputHistory, submitCo
         updateTab(tab.id, { context: ev });
         if (document.querySelector(`.transcript.active`)?.dataset.tabId === tab.id) {
           setContextUsage(ev);
+        }
+        break;
+      case "cwd":
+        tab.cwd = ev.path || "";
+        updateTab(tab.id, { cwd: tab.cwd });
+        if (document.querySelector(`.transcript.active`)?.dataset.tabId === tab.id) {
+          setCwd(tab.cwd);
         }
         break;
       case "tool":

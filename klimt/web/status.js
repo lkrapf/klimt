@@ -1,4 +1,5 @@
 const modelLabel = document.getElementById("model");
+const cwdLabel = document.getElementById("cwd");
 const statusLabel = document.getElementById("status");
 const contextLabel = document.getElementById("context");
 
@@ -23,12 +24,12 @@ export function setContextUsage(ctx) {
 
   const tokens = formatTokens(ctx.tokens);
   if (!ctx.contextWindow) {
-    contextLabel.textContent = `ctx ${tokens}`;
+    contextLabel.textContent = tokens;
     return;
   }
 
   const pct = ctx.percent === null || ctx.percent === undefined ? "?" : ctx.percent.toFixed(1) + "%";
-  contextLabel.textContent = `ctx ${tokens}/${formatTokens(ctx.contextWindow)} (${pct})`;
+  contextLabel.textContent = `${tokens}/${formatTokens(ctx.contextWindow)} (${pct})`;
   const value = Number(ctx.percent || 0);
   if (value > 90) contextLabel.classList.add("danger");
   else if (value > 70) contextLabel.classList.add("warning");
@@ -37,6 +38,25 @@ export function setContextUsage(ctx) {
 export function setSessionLabel(model, name) {
   if (model !== undefined) modelLabel.dataset.model = model || "";
   modelLabel.textContent = [modelLabel.dataset.model, name].filter(Boolean).join(" · ");
+}
+
+function compactPath(path) {
+  const value = path || "";
+  const parts = value.split("/");
+  if (parts.length <= 3) return value;
+
+  const absolute = parts[0] === "";
+  const names = parts.filter(Boolean);
+  if (names.length <= 2) return value;
+
+  const compact = names.map((part, i) => (i === names.length - 1 ? part : part[0] || part));
+  return (absolute ? "/" : "") + compact.join("/");
+}
+
+export function setCwd(path) {
+  const value = path || "";
+  cwdLabel.textContent = compactPath(value);
+  cwdLabel.title = value;
 }
 
 function updateStatus() {
@@ -62,6 +82,7 @@ export function setQueueCount(count) {
 
 export function showTabStatus(tab) {
   setSessionLabel(tab?.model, tab?.session);
+  setCwd(tab?.cwd);
   setContextUsage(tab?.context);
   setWorking(Boolean(tab?.working));
   setQueueCount(tab?.queue?.length || 0);

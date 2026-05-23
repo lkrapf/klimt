@@ -5,6 +5,7 @@ import contextlib
 import json
 import os
 import threading
+from pathlib import Path
 from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
@@ -144,6 +145,7 @@ class ChatSession:
     history: List[Dict] = field(default_factory=list)
     session_name: str = field(default_factory=random_session_name)
     input_history: List[str] = field(default_factory=list)
+    cwd: str = field(default_factory=lambda: str(os.getcwd()))
     store: SessionStore = field(default_factory=SessionStore, repr=False)
     _provider: ChatProvider = field(default=None, init=False, repr=False)
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -178,7 +180,7 @@ class ChatSession:
     def persist(self) -> None:
         if self._abandoned:
             return
-        self.store.save(self.session_name, self.history, self.input_history, self.model)
+        self.store.save(self.session_name, self.history, self.input_history, self.model, self.cwd)
 
     def remember_input(self, text: str) -> None:
         text = text.strip()
@@ -204,6 +206,10 @@ class ChatSession:
         self.history = data.get("history") or []
         self.input_history = data.get("input_history") or []
         saved_model = (data.get("model") or "").strip()
+        saved_cwd = (data.get("cwd") or "").strip()
+        if saved_cwd:
+            self.cwd = str(Path(saved_cwd).expanduser().resolve())
+            self.store = self.store.for_folder(self.cwd)
         if saved_model:
             self.model = saved_model
             self.reload_client()
@@ -339,6 +345,7 @@ class ChatSession:
             active_lock=self._active_lock,
             active_stream_ref=self._active_stream_ref,
             emit=emit,
+            cwd=self.cwd,
         )
         if completed:
             self.persist()

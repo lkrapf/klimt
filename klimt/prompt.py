@@ -33,13 +33,18 @@ def _section(title: str, body: str) -> str:
     return f"# {title}\n\n{body}"
 
 
-def build_tools_manifest(schemas: Iterable[dict[str, Any]]) -> str:
+def build_tools_manifest(schemas: Iterable[dict[str, Any]], cwd: str | None = None) -> str:
     lines = [
         "# Runtime tool manifest",
         "",
         "The following tools are available in this session. Their schemas are enforced by Klimt.",
-        "",
     ]
+    if cwd:
+        lines.extend([
+            "",
+            f"The current working directory for relative file and shell operations is `{cwd}`.",
+        ])
+    lines.append("")
     found = False
     for schema in schemas:
         fn = schema.get("function", {})
@@ -115,10 +120,11 @@ def build_system_prompt(
     tool_schemas: Iterable[dict[str, Any]],
     skill_items: Iterable[dict[str, Any]],
     start: Path | None = None,
+    cwd: str | None = None,
 ) -> str:
     parts = [
         _read_text_if_exists(KERNEL_PROMPT_PATH),
-        build_tools_manifest(tool_schemas),
+        build_tools_manifest(tool_schemas, cwd),
         build_skills_manifest(skill_items),
         _section("Global user profile", load_global_profile()),
         _section("Project instructions", load_project_agents(start)),

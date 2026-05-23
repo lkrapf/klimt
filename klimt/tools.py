@@ -129,8 +129,16 @@ SCHEMAS = [
 ]
 
 
-def _read(path: str, offset: int = 1, limit: int | None = None) -> str:
+def _resolve_path(path: str, cwd: str | None = None) -> Path:
     p = Path(path).expanduser()
+    if p.is_absolute():
+        return p
+    base = Path(cwd or os.getcwd()).expanduser()
+    return base / p
+
+
+def _read(path: str, offset: int = 1, limit: int | None = None, cwd: str | None = None) -> str:
+    p = _resolve_path(path, cwd)
     raw = p.read_bytes()
     if b"\x00" in raw[:8192]:
         return f"error: binary file not shown: {p}"
@@ -178,11 +186,11 @@ def _read(path: str, offset: int = 1, limit: int | None = None) -> str:
     return "\n".join(part for part in out if part)
 
 
-def _edit(path: str, edits: list[dict[str, str]]) -> str:
+def _edit(path: str, edits: list[dict[str, str]], cwd: str | None = None) -> str:
     if not edits:
         return "error: edits must not be empty"
 
-    p = Path(path).expanduser()
+    p = _resolve_path(path, cwd)
     original = p.read_bytes()
     matches: list[tuple[int, int, bytes, bytes]] = []
 
@@ -218,8 +226,8 @@ def _edit(path: str, edits: list[dict[str, str]]) -> str:
     return f"edited {p}: {len(edits)} replacement(s), {len(original)} -> {len(updated)} bytes ({delta:+d})"
 
 
-def _write(path: str, content: str) -> str:
-    p = Path(path).expanduser()
+def _write(path: str, content: str, cwd: str | None = None) -> str:
+    p = _resolve_path(path, cwd)
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8")
     return f"wrote {len(content)} bytes to {p}"
@@ -509,7 +517,10 @@ def _kill_process_tree(p: subprocess.Popen[str]) -> None:
         p.kill()
 
 
-def _bash(command: str, cancel: Event | None = None) -> str:
+def _bash(command: str, cancel: Event | None = None, cwd: str | None = None) -> str:
+    workdir = Path(cwd or os.getcwd()).expanduser()
+    if not workdir.exists() or not workdir.is_dir():
+        return f"error: cwd is not a directory: {workdir}"
     p = subprocess.Popen(
         command,
         shell=True,
@@ -517,6 +528,7 @@ def _bash(command: str, cancel: Event | None = None) -> str:
         stderr=subprocess.PIPE,
         text=True,
         start_new_session=True,
+        cwd=str(workdir),
     )
     deadline = time.monotonic() + BASH_TIMEOUT
 
@@ -535,16 +547,16 @@ def _bash(command: str, cancel: Event | None = None) -> str:
     return _format_result(p.returncode, stdout, stderr)
 
 
-def run(name: str, args: Dict[str, Any], cancel: Event | None = None) -> str:
+def run(name: str, args: Dict[str, Any], cancel: Event | None = None, cwd: str | None = None) -> str:
     try:
         if name == "read":
-            return _read(args["path"], args.get("offset", 1), args.get("limit"))
+            return _read(args["path"], args.get("offset", 1), args.get("limit"), cwd)
         if name == "edit":
-            return _edit(args["path"], args["edits"])
+            return _edit(args["path"], args["edits"], cwd)
         if name == "write":
-            return _write(args["path"], args["content"])
+            return _write(args["path"], args["content"], cwd)
         if name == "bash":
-            return _bash(args["command"], cancel)
+            return _bash(args["command"], cancel, cwd)
         if name == "webfetch":
             return _webfetch(args["url"])
         if name == "websearch":

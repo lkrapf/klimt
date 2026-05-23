@@ -22,14 +22,16 @@ WEB_DIR = Path(__file__).parent / "web"
 ASSETS_DIR = Path(__file__).parent / "assets"
 ICON_PATH = ASSETS_DIR / "klimt-icon.png"
 
-def _build_system_prompt() -> str:
-    return prompt.build_system_prompt(tools.SCHEMAS, skills.list_skills())
+def _build_system_prompt(cwd: str | None = None) -> str:
+    return prompt.build_system_prompt(tools.SCHEMAS, skills.list_skills(), cwd=cwd)
 
 
-def _new_session() -> ChatSession:
+def _new_session(cwd: str | None = None) -> ChatSession:
+    cwd = str(Path(cwd or os.getcwd()).expanduser().resolve())
     return ChatSession(
         model=default_model_name(),
-        system=_build_system_prompt(),
+        system=_build_system_prompt(cwd),
+        cwd=cwd,
     )
 
 
@@ -58,6 +60,7 @@ class _SingleTabApi:
     def _sync_input_history(self) -> None:
         self._emit({"type": "input_history", "items": self._session.input_history})
         self._emit({"type": "session", "name": self._session.session_name, "model": self._session.model})
+        self._emit({"type": "cwd", "path": self._session.cwd})
         self._emit({"type": "context", **self._session.context_usage()})
 
     def _replay_session(self) -> None:
@@ -163,6 +166,9 @@ class _SingleTabApi:
         if command == "/compact" or command.startswith("/compact "):
             self._compact(command[8:].strip())
             return True
+        if command == "/cd" or command.startswith("/cd "):
+            self._cd(command[3:].strip())
+            return True
         if command == "/help":
             self._help()
             return True
@@ -229,7 +235,7 @@ class _SingleTabApi:
         # request, abandon that ChatSession so late persistence is ignored, and
         # swap in a clean copy of the pre-turn session immediately.
         old_session.abandon()
-        restored = _new_session()
+        restored = _new_session(old_session.cwd)
         restored.model = old_session.model
         restored.reload_client()
         restored.session_name = old_session.session_name
@@ -254,6 +260,7 @@ class _SingleTabApi:
             "session": self._session.session_name,
             "input_history": self._session.input_history,
             "context": self._session.context_usage(),
+            "cwd": self._session.cwd,
             "busy": self._is_busy(),
         }
 
@@ -272,6 +279,7 @@ class _SingleTabApi:
             "session": self._session.session_name,
             "input_history": self._session.input_history,
             "context": self._session.context_usage(),
+            "cwd": self._session.cwd,
             "skills": skills.list_skills(),
             "commands": [
                 {"usage": usage, "description": description}
@@ -321,6 +329,30 @@ class _SingleTabApi:
             desc = self._md_escape(s.get("description") or "(no description)")
             lines.append(f"| `/{name}` | {desc} |")
         return "\n".join(lines)
+
+    def _cd(self, arg: str) -> None:
+        if not arg:
+            self._emit({"type": "text", "content": f"cwd: `{self._md_escape(self._session.cwd)}`\n\n_usage: `/cd <path>`_"})
+            return
+
+        wanted = Path(arg).expanduser()
+        if not wanted.is_absolute():
+            wanted = Path(self._session.cwd) / wanted
+        try:
+            resolved = wanted.resolve(strict=True)
+        except FileNotFoundError:
+            self._emit({"type": "text", "content": f"_no such directory: `{self._md_escape(arg)}`_"})
+            return
+        if not resolved.is_dir():
+            self._emit({"type": "text", "content": f"_not a directory: `{self._md_escape(arg)}`_"})
+            return
+
+        self._session.cwd = str(resolved)
+        self._session.system = _build_system_prompt(self._session.cwd)
+        self._session.store = self._session.store.for_folder(self._session.cwd)
+        self._session.persist()
+        self._sync_input_history()
+        self._emit({"type": "text", "content": f"cwd set to `{self._md_escape(self._session.cwd)}`"})
 
     def _compact(self, arg: str) -> None:
         keep_recent = 8
@@ -423,7 +455,7 @@ class _SingleTabApi:
 
     def _new(self) -> None:
         self._session.interrupt()
-        self._session = _new_session()
+        self._session = _new_session(self._session.cwd)
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
@@ -466,8 +498,9 @@ class _SingleTabApi:
 
     def _clear_sessions(self) -> None:
         self._session.interrupt()
+        old_cwd = self._session.cwd
         self._session.store.clear()
-        self._session = _new_session()
+        self._session = _new_session(old_cwd)
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
@@ -551,7 +584,7 @@ class _SingleTabApi:
         importlib.reload(prompt)
         importlib.reload(skills)
         importlib.reload(tools)
-        self._session.system = _build_system_prompt()
+        self._session.system = _build_system_prompt(self._session.cwd)
         self._session.reload_client()
         self._emit({"type": "reload_css"})
         self._sync_input_history()
@@ -605,6 +638,7 @@ class Api:
             "session": first["session"],
             "input_history": first["input_history"],
             "context": first["context"],
+            "cwd": first["cwd"],
             "skills": skills.list_skills(),
             "commands": [
                 {"usage": usage, "description": description}

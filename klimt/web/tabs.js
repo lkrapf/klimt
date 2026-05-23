@@ -14,6 +14,7 @@ function tabState(tab) {
     model: tab.model || "",
     session: tab.session || "",
     inputHistory: Array.isArray(tab.input_history) ? tab.input_history.slice() : [],
+    cwd: tab.cwd || "",
     context: tab.context || null,
     working: Boolean(tab.busy),
     queue: [],
@@ -124,7 +125,7 @@ function renderTabs() {
     button.className = "tab";
     button.classList.toggle("active", tab.id === activeTabId);
     button.classList.toggle("working", Boolean(tab.working));
-    button.title = [tab.model, tab.session].filter(Boolean).join(" · ");
+    button.title = [tab.model, tab.session, tab.cwd].filter(Boolean).join(" · ");
     button.addEventListener("click", () => activateTab(tab.id));
 
     const label = document.createElement("span");

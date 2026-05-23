@@ -20,6 +20,7 @@ def run_turn(
     active_lock: threading.Lock,
     active_stream_ref: dict[str, Any],
     emit: Emit,
+    cwd: str | None = None,
 ) -> bool:
     """Run one assistant turn, including any tool-call continuations.
 
@@ -148,7 +149,7 @@ def run_turn(
                 args = json.loads(v["args"] or "{}")
             except json.JSONDecodeError:
                 args = {"_raw": v["args"]}
-            result = tools.run(v["name"], args, cancel)
+            result = tools.run(v["name"], args, cancel, cwd)
             emit({
                 "type": "tool",
                 "name": v["name"],

@@ -120,8 +120,16 @@ html, body, .msg, .msg * {
   gap: 14px;
   padding: 4px 12px;
   border-top: 1px solid var(--border);
+  min-width: 0;
 }
 .muted { color: var(--dim); font-size: 12px; }
+.cwd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 80px;
+}
+.context { flex: 0 0 auto; }
 .context.warning { color: #ffb347; }
 .context.danger { color: #ff6a3a; }
 .status {
