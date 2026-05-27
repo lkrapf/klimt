@@ -25,6 +25,21 @@ roadmap theater.
 - [ ] Vendor static copies of frontend dependencies instead of loading them from CDNs.
 - [x] Support Anthropic Claude Code OAuth token auth; do not support Claude web session-cookie auth.
 - [ ] Add CSS theme support.
+- [x] Add tab completion in the composer.
+  - [x] Backend: expose one `complete(text, cursor, tab_id)` API that returns `{range, items}`; keep completion state on the client, not in chat history.
+  - [x] Complete slash command names from `commands.command_rows()` and skill names from `skills.list_skills()` when the token starts with `/`.
+  - [x] Complete command arguments by command context:
+    - `/cd <path>`: directories only, relative to the tab cwd, with `~` expansion.
+    - `/model <prefix>`: configured model names from `list_model_configs()`.
+    - `/sessions resume|delete <prefix>`: saved session names from `ChatSession.list_sessions()`; no numeric-index completion needed.
+  - [x] Complete filesystem paths in `!` shell commands and ordinary prompts.
+    - Use lightweight shell-ish token detection around the cursor: respect whitespace, quotes, and backslash escapes enough for path tokens; do not try to parse full shell syntax.
+    - Resolve relative candidates against the active tab cwd; expand `~`; append `/` for directories.
+    - Preserve the user's quote style and escape spaces/special chars only for unquoted replacements.
+  - [x] Frontend: intercept bare `Tab` in `input.js`; ask backend for candidates; if one match, replace the active token; if many, insert the longest common prefix and show a small chooser anchored near the composer.
+  - [x] Repeated `Tab` cycles visible candidates; `Esc` closes the chooser; normal typing invalidates stale candidates.
+  - [x] Keep completion out of busy-state semantics: it works while a tab is streaming, using that tab's cwd/session/model metadata.
+  - [x] Add tests for path tokenization/replacement, cwd-relative lookup, session filtering, and slash-command context detection.
 
 ## Agent architecture
 

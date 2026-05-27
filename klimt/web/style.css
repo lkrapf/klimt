@@ -449,6 +449,36 @@ body.hide-reasoning .msg.reasoning { display: none; }
 }
 #input:focus { outline: none; border-color: var(--fg); }
 
+.completion-popup {
+  position: fixed;
+  z-index: 20;
+  max-height: 220px;
+  overflow: auto;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  box-shadow: 0 0 0 1px #000000aa;
+}
+.completion-item {
+  display: block;
+  width: 100%;
+  background: transparent;
+  color: var(--fg);
+  border: 0;
+  border-bottom: 1px dashed var(--border);
+  padding: 4px 8px;
+  font: inherit;
+  text-align: left;
+  text-shadow: var(--glow);
+  white-space: pre;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.completion-item:last-child { border-bottom: 0; }
+.completion-item.active,
+.completion-item:hover {
+  color: var(--hot);
+  background: #00000055;
+}
 
 .msg.streaming .body::after {
   content: "\2588";

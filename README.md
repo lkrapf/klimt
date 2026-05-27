@@ -96,7 +96,9 @@ after `/model`. `model` or `deployment` is what Klimt sends to the provider.
       "name": "claude",
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
-      "context_window": 200000
+      "context_window": 200000,
+      "max_completion_tokens": 16000,
+      "thinking_budget_tokens": 10000
     }
   ]
 }
@@ -127,6 +129,20 @@ OpenAI-compatible endpoint enforces auth.
 OAuth token files are written with mode `0600`. Do not use Claude web session
 cookies; Klimt only supports API/OAuth-style credentials through Anthropic's API
 endpoint.
+
+### Token limits
+
+Two optional fields control output size per model endpoint:
+
+- **`max_completion_tokens`** — maximum tokens the model may generate in a
+  single response. Default: `4096`. Accepts `max_tokens` as an alias.
+- **`thinking_budget_tokens`** — reasoning token budget for Anthropic extended
+  thinking. Default: `0` (disabled). Accepts `thinking_budget` as an alias.
+  Must be strictly less than `max_completion_tokens`.
+
+`thinking_budget_tokens` only takes effect on the native Anthropic OAuth path
+(i.e. when `api_key_env` is omitted). It is silently ignored for all other
+providers and for Anthropic entries that use an API key.
 
 ## Global and project instructions
 
@@ -222,7 +238,8 @@ Keyboard shortcuts:
 
 - `Enter` — send.
 - `Shift+Enter` — newline.
-- `Esc` — interrupt current tab's work.
+- `Tab` — complete commands, paths, models, and session names at the cursor.
+- `Esc` — close completion popup, or interrupt current tab's work.
 - `Ctrl+T` — new tab.
 - `Ctrl+W` — close current tab.
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` — next / previous tab.

@@ -1,3 +1,4 @@
+import { acceptVisibleCompletion, cancelCompletion, completeAtCursor } from "./completion.js";
 import { setQueueCount, setWorking as setWorkingStatus } from "./status.js";
 import { activeTab, activeId, activateTab, addTab, allTabs, closeTab as closeLocalTab, updateTab } from "./tabs.js";
 import { addMessage, addPending, finalizeStreaming, useTranscript } from "./transcript.js";
@@ -195,7 +196,24 @@ export function installInputHandlers(klimt) {
       }
     }
 
+    if (e.key === "Tab" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault();
+      completeAtCursor(activeId());
+      return;
+    }
+
+    if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      if (cancelCompletion()) {
+        e.preventDefault();
+        return;
+      }
+    }
+
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (acceptVisibleCompletion()) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       send(klimt);
     }

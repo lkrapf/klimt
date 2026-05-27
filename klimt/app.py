@@ -14,7 +14,7 @@ from typing import Any
 
 import webview
 
-from . import __version__, commands, prompt, skills, tools
+from . import __version__, commands, completion, prompt, skills, tools
 from .api import ChatSession
 from .model_config import default_model_name, list_model_configs, list_model_names
 
@@ -263,6 +263,13 @@ class _SingleTabApi:
             "cwd": self._session.cwd,
             "busy": self._is_busy(),
         }
+
+    def complete(self, text: str, cursor: int | None = None) -> dict:
+        try:
+            return completion.complete(self._session, text, cursor)
+        except Exception as e:  # noqa: BLE001
+            pos = int(cursor or 0)
+            return {"range": {"start": pos, "end": pos}, "items": [], "error": f"{type(e).__name__}: {e}"}
 
     def info(self) -> dict:
         available_tools = [
@@ -655,6 +662,9 @@ class Api:
 
     def interrupt(self, tab_id: str | None = None) -> dict:
         return self._tab(tab_id).interrupt()
+
+    def complete(self, text: str, cursor: int | None = None, tab_id: str | None = None) -> dict:
+        return self._tab(tab_id).complete(text, cursor)
 
     def new_tab(self) -> dict:
         with self._tabs_lock:
