@@ -1,4 +1,4 @@
-import { enhance, renderMarkdown, streamEnhanceKey } from "./render.js";
+import { enhance, renderMarkdown } from "./render.js";
 import { transcriptFor } from "./tabs.js";
 
 let currentTabId = null;
@@ -252,26 +252,7 @@ export function startStreaming() {
     pending: false,
     raf: null,
     done: false,
-    enhanceTimer: null,
-    enhancedKey: "",
-    renderSerial: 0,
-    enhancedSerial: 0,
   };
-}
-
-function scheduleStreamEnhance(h) {
-  const key = streamEnhanceKey(h.raw);
-  if (!key) return;
-  if (key === h.enhancedKey && h.enhancedSerial === h.renderSerial) return;
-
-  if (h.enhanceTimer !== null) clearTimeout(h.enhanceTimer);
-  h.enhanceTimer = setTimeout(() => {
-    h.enhanceTimer = null;
-    if (h.done) return;
-    enhance(h.body);
-    h.enhancedKey = key;
-    h.enhancedSerial = h.renderSerial;
-  }, 120);
 }
 
 export function appendDelta(h, txt) {
@@ -284,8 +265,6 @@ export function appendDelta(h, txt) {
     h.pending = false;
     if (h.done) return;
     h.body.innerHTML = renderMarkdown(h.raw);
-    h.renderSerial += 1;
-    scheduleStreamEnhance(h);
     scrollToBottom();
   });
 }
@@ -296,10 +275,6 @@ export function finalizeStreaming(h) {
   if (h.raf !== null) {
     cancelAnimationFrame(h.raf);
     h.raf = null;
-  }
-  if (h.enhanceTimer !== null) {
-    clearTimeout(h.enhanceTimer);
-    h.enhanceTimer = null;
   }
   h.body.innerHTML = renderMarkdown(h.raw);
   enhance(h.body);

@@ -133,43 +133,6 @@ function autoCloseFences(s) {
   return fences % 2 ? s + "\n```" : s;
 }
 
-function hasOpenFence(s) {
-  return ((s.match(/^```/gm) || []).length % 2) !== 0;
-}
-
-function countClosedMermaidBlocks(s) {
-  return (s.match(/(^|\n)```mermaid[\s\S]*?\n```/gi) || []).length;
-}
-
-function countUnescaped(s, token) {
-  let count = 0;
-  let pos = 0;
-  while (true) {
-    const i = s.indexOf(token, pos);
-    if (i < 0) return count;
-    let slashes = 0;
-    for (let j = i - 1; j >= 0 && s[j] === "\\"; j--) slashes += 1;
-    if (slashes % 2 === 0) count += 1;
-    pos = i + token.length;
-  }
-}
-
-function mathBlockCount(s) {
-  const displayDollars = Math.floor(countUnescaped(s, "$$") / 2);
-  const bracketBlocks = (s.match(/\\\[[\s\S]*?\\\]/g) || []).length;
-  const parenBlocks = (s.match(/\\\([\s\S]*?\\\)/g) || []).length;
-  return displayDollars + bracketBlocks + parenBlocks;
-}
-
-export function streamEnhanceKey(raw) {
-  const math = mathBlockCount(raw);
-  const mermaid = hasOpenFence(raw) ? 0 : countClosedMermaidBlocks(raw);
-  const parts = [];
-  if (math) parts.push(`math:${math}`);
-  if (mermaid) parts.push(`mermaid:${mermaid}`);
-  return parts.join("+");
-}
-
 let mermaidCounter = 0;
 
 function waitForGlobal(name, timeoutMs = 5000) {
