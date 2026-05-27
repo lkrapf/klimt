@@ -5,6 +5,8 @@ Markdown UI, persistent sessions, prompt layering, skills, and model tool calls.
 It supports Azure OpenAI, OpenAI, OpenAI-compatible endpoints, Ollama, and
 Anthropic through Anthropic's OpenAI-compatible endpoint.
 
+Klimt is heavily inspired by the fantastic [`pi` harness](https://pi.dev).
+
 ## Requirements
 
 - Python 3.10+
