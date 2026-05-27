@@ -1,3 +1,3 @@
-"""Klimt - a small HTML harness for the Anthropic API."""
+"""Klimt - a small local LLM harness."""
 
-__version__ = "v0.1"
+__version__ = "v0.2.0"

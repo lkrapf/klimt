@@ -22,8 +22,12 @@ pip install -r requirements.txt
 python3 -m klimt
 ```
 
-Running with `python3 -m klimt` assumes you are in the repository checkout. If you
-want a packaged install, add packaging first; Klimt does not currently ship one.
+For an editable install with the `klimt` console script:
+
+```bash
+pip install -e .
+klimt
+```
 
 ## Quick start
 
