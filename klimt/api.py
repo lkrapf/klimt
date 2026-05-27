@@ -321,7 +321,9 @@ class ChatSession:
         return (content or "").strip() or "# Compacted context\n\n- compaction returned no content"
 
     def reload_client(self) -> None:
-        self._provider = ChatProvider(self.model_config())
+        config = self.model_config()
+        self.max_tokens = config.max_completion_tokens or 4096
+        self._provider = ChatProvider(config)
 
     def stream(self, user_text: str, emit: Emit) -> None:
         """Push events for one user turn.

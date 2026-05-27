@@ -10,6 +10,9 @@ from .api_types import Emit
 from .providers import ChatProvider
 
 
+_NORMAL_FINISH_REASONS = {"stop", "tool_calls", "end_turn", "tool_use", "stop_sequence"}
+
+
 def run_turn(
     *,
     provider: ChatProvider,
@@ -36,7 +39,7 @@ def run_turn(
             messages=[
                 {"role": "system", "content": system},
                 *[
-                    {k: v for k, v in m.items() if k not in {"usage", "reasoning"}}
+                    _message_for_provider(m, provider)
                     for m in history
                 ],
             ],
@@ -48,10 +51,12 @@ def run_turn(
 
         content_buf: List[str] = []
         reasoning_buf: List[str] = []
+        reasoning_signature = None
         tool_calls: Dict[int, Dict[str, str]] = {}
         text_open = False
         reasoning_open = False
         usage = None
+        finish_reason = None
 
         try:
             for chunk in stream:
@@ -59,13 +64,23 @@ def run_turn(
                     break
                 if getattr(chunk, "usage", None):
                     usage = chunk.usage
+                chunk_finish_reason = getattr(chunk, "finish_reason", None)
+                if chunk_finish_reason:
+                    finish_reason = str(chunk_finish_reason)
                 if not chunk.choices:
                     continue
-                delta = chunk.choices[0].delta
+                choice = chunk.choices[0]
+                choice_finish_reason = getattr(choice, "finish_reason", None)
+                if choice_finish_reason:
+                    finish_reason = str(choice_finish_reason)
+                delta = choice.delta
                 if delta is None:
                     continue
 
                 reasoning_delta = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+                delta_reasoning_signature = getattr(delta, "reasoning_signature", None)
+                if delta_reasoning_signature:
+                    reasoning_signature = str(delta_reasoning_signature)
                 if reasoning_delta:
                     if not reasoning_open:
                         emit({"type": "reasoning_start"})
@@ -117,6 +132,9 @@ def run_turn(
         if text_open:
             emit({"type": "text_end"})
 
+        if finish_reason and finish_reason not in _NORMAL_FINISH_REASONS:
+            emit({"type": "error", "message": _finish_reason_message(finish_reason, max_tokens)})
+
         full_text = "".join(content_buf)
         full_reasoning = "".join(reasoning_buf)
         assistant_entry: Dict[str, Any] = {
@@ -125,8 +143,12 @@ def run_turn(
         }
         if full_reasoning:
             assistant_entry["reasoning"] = full_reasoning
+        if reasoning_signature:
+            assistant_entry["reasoning_signature"] = reasoning_signature
         if usage:
             assistant_entry["usage"] = _usage_dict(usage)
+        if finish_reason:
+            assistant_entry["finish_reason"] = finish_reason
         if tool_calls:
             assistant_entry["tool_calls"] = [
                 {
@@ -164,6 +186,24 @@ def run_turn(
                 "tool_call_id": v["id"],
                 "content": result,
             })
+
+
+def _message_for_provider(msg: dict[str, Any], provider: ChatProvider) -> dict[str, Any]:
+    out = {k: v for k, v in msg.items() if k not in {"usage", "reasoning", "reasoning_signature"}}
+    if provider.preserves_reasoning_blocks() and msg.get("reasoning"):
+        out["reasoning"] = msg["reasoning"]
+        if msg.get("reasoning_signature"):
+            out["reasoning_signature"] = msg["reasoning_signature"]
+    return out
+
+
+def _finish_reason_message(finish_reason: str, max_tokens: int) -> str:
+    if finish_reason in {"length", "max_tokens"}:
+        return (
+            f"model stopped because the max completion token limit was reached "
+            f"({max_tokens}); say continue or increase max_completion_tokens"
+        )
+    return f"model stopped with finish reason: {finish_reason}"
 
 
 def _usage_dict(usage: Any) -> Dict[str, int]:

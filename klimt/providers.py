@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from types import SimpleNamespace
@@ -16,6 +17,7 @@ from .model_config import ModelConfig, resolve_model_config
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_OAUTH_BETA = "claude-code-20250219,oauth-2025-04-20"
 KLIMT_USER_AGENT = "Klimt/0.1"
+PROVIDER_DEBUG = bool(os.environ.get("KLIMT_PROVIDER_DEBUG"))
 
 
 class ChatProvider:
@@ -56,6 +58,9 @@ class ChatProvider:
     def provider_model(self) -> str:
         return self.config.provider_model()
 
+    def preserves_reasoning_blocks(self) -> bool:
+        return self._anthropic_oauth
+
     def complete(self, messages: list[dict[str, Any]], max_completion_tokens: int) -> Any:
         if self._anthropic_oauth:
             return _anthropic_oauth_complete(
@@ -94,6 +99,12 @@ class ChatProvider:
         )
 
 
+def _debug_provider_event(provider: str, event: dict[str, Any]) -> None:
+    if not PROVIDER_DEBUG:
+        return
+    print(f"[klimt:{provider}] {json.dumps(event, ensure_ascii=False)}", flush=True)
+
+
 def _anthropic_base_url(config: ModelConfig) -> str:
     base = (config.base_url or "https://api.anthropic.com").rstrip("/")
     if base.endswith("/v1"):
@@ -128,6 +139,13 @@ def _anthropic_payload(
         "messages": _anthropic_messages(rest),
         "stream": stream,
     }
+    if config.thinking_budget_tokens:
+        if config.thinking_budget_tokens >= max_completion_tokens:
+            raise ValueError("thinking_budget_tokens must be lower than max_completion_tokens")
+        payload["thinking"] = {
+            "type": "enabled",
+            "budget_tokens": config.thinking_budget_tokens,
+        }
     tools = _anthropic_tools(tool_schemas or [])
     if tools:
         payload["tools"] = tools
@@ -166,6 +184,13 @@ def _anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }])
         elif role == "assistant":
             blocks: list[dict[str, Any]] = []
+            reasoning = msg.get("reasoning")
+            if reasoning:
+                thinking_block = {"type": "thinking", "thinking": str(reasoning)}
+                signature = msg.get("reasoning_signature")
+                if signature:
+                    thinking_block["signature"] = str(signature)
+                blocks.append(thinking_block)
             content = msg.get("content")
             if content:
                 blocks.append({"type": "text", "text": str(content)})
@@ -207,6 +232,12 @@ def _anthropic_tools(tool_schemas: list[dict[str, Any]]) -> list[dict[str, Any]]
             "input_schema": fn.get("parameters") or {"type": "object"},
         })
     return out
+
+
+def _anthropic_initial_tool_args(value: Any) -> str:
+    if value in (None, "", {}):
+        return ""
+    return json.dumps(value, ensure_ascii=False)
 
 
 def _anthropic_request(config: ModelConfig, api_key: str, payload: dict[str, Any]) -> urllib.request.Request:
@@ -271,6 +302,7 @@ class _AnthropicOAuthStream:
         self._payload = _anthropic_payload(config, messages, tool_schemas, max_completion_tokens, stream=True)
         self._response: Any = None
         self._usage: dict[str, Any] = {}
+        self._tool_blocks: dict[int, dict[str, str]] = {}
 
     def close(self) -> None:
         if self._response is not None:
@@ -283,7 +315,9 @@ class _AnthropicOAuthStream:
                 for raw in response:
                     line = raw.decode("utf-8", errors="replace").strip()
                     if line.startswith("data: "):
-                        yield from self._event(json.loads(line[6:]))
+                        event = json.loads(line[6:])
+                        _debug_provider_event("anthropic", event)
+                        yield from self._event(event)
         except urllib.error.HTTPError as exc:
             raise RuntimeError(_anthropic_error(exc)) from exc
         finally:
@@ -295,25 +329,56 @@ class _AnthropicOAuthStream:
             delta = event.get("delta") or {}
             if delta.get("type") == "text_delta":
                 yield _chunk(content=delta.get("text") or "")
+            elif delta.get("type") == "thinking_delta":
+                yield _chunk(reasoning=delta.get("thinking") or "")
+            elif delta.get("type") == "signature_delta":
+                yield _chunk(reasoning_signature=delta.get("signature") or "")
             elif delta.get("type") == "input_json_delta":
+                index = int(event.get("index") or 0)
+                block = self._tool_blocks.get(index)
+                if block is None:
+                    raise RuntimeError(f"Anthropic sent tool input JSON for unknown content block {index}")
+                partial = delta.get("partial_json") or ""
+                block["args"] += partial
                 yield _chunk(tool_calls=[_tool_delta(
-                    index=int(event.get("index") or 0),
-                    arguments=delta.get("partial_json") or "",
+                    index=index,
+                    arguments=partial,
                 )])
         elif event_type == "content_block_start":
             block = event.get("content_block") or {}
+            index = int(event.get("index") or 0)
             if block.get("type") == "tool_use":
+                tool_id = str(block.get("id") or "")
+                name = str(block.get("name") or "")
+                if not tool_id or not name:
+                    raise RuntimeError(f"Anthropic sent malformed tool_use block at index {index}")
+                initial_args = _anthropic_initial_tool_args(block.get("input"))
+                self._tool_blocks[index] = {"id": tool_id, "name": name, "args": initial_args}
                 yield _chunk(tool_calls=[_tool_delta(
-                    index=int(event.get("index") or 0),
-                    tool_id=block.get("id") or "",
-                    name=block.get("name") or "",
+                    index=index,
+                    tool_id=tool_id,
+                    name=name,
                 )])
+                if initial_args:
+                    yield _chunk(tool_calls=[_tool_delta(index=index, arguments=initial_args)])
             elif block.get("type") == "text" and block.get("text"):
                 yield _chunk(content=block.get("text") or "")
+            elif block.get("type") == "thinking":
+                if block.get("thinking"):
+                    yield _chunk(reasoning=block.get("thinking") or "")
+                if block.get("signature"):
+                    yield _chunk(reasoning_signature=block.get("signature") or "")
+        elif event_type == "content_block_stop":
+            index = int(event.get("index") or 0)
+            if index in self._tool_blocks:
+                self._validate_tool_block(index)
         elif event_type == "message_delta":
             usage = event.get("usage") or {}
             if usage:
                 self._usage.update(usage)
+            stop_reason = (event.get("delta") or {}).get("stop_reason")
+            if stop_reason:
+                yield SimpleNamespace(choices=[], usage=None, finish_reason=str(stop_reason))
         elif event_type == "message_start":
             usage = (event.get("message") or {}).get("usage") or {}
             if usage:
@@ -321,10 +386,33 @@ class _AnthropicOAuthStream:
         elif event_type == "message_stop":
             yield SimpleNamespace(choices=[], usage=_anthropic_usage(self._usage))
 
+    def _validate_tool_block(self, index: int) -> None:
+        block = self._tool_blocks[index]
+        if not block["id"] or not block["name"]:
+            raise RuntimeError(f"Anthropic sent malformed tool_use block at index {index}")
+        try:
+            parsed = json.loads(block["args"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Anthropic tool input JSON was incomplete for tool {block['name']}: {exc.msg}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"Anthropic tool input for tool {block['name']} was not a JSON object")
 
-def _chunk(content: str | None = None, tool_calls: list[Any] | None = None) -> Any:
+
+def _chunk(
+    content: str | None = None,
+    tool_calls: list[Any] | None = None,
+    reasoning: str | None = None,
+    reasoning_signature: str | None = None,
+) -> Any:
     return SimpleNamespace(
-        choices=[SimpleNamespace(delta=SimpleNamespace(content=content, tool_calls=tool_calls or []))],
+        choices=[SimpleNamespace(delta=SimpleNamespace(
+            content=content,
+            tool_calls=tool_calls or [],
+            reasoning=reasoning,
+            reasoning_signature=reasoning_signature,
+        ))],
         usage=None,
     )
 

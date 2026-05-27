@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 MODELS_PATH = Path.home() / ".klimt" / "models.json"
+DEFAULT_MAX_COMPLETION_TOKENS = 4096
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,8 @@ class ModelConfig:
     api_version: str = ""
     api_key_env: str = ""
     context_window: int = 0
+    max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
+    thinking_budget_tokens: int = 0
 
     def provider_model(self) -> str:
         return self.model or self.name
@@ -61,6 +64,16 @@ def _item_to_config(item: Any) -> ModelConfig | None:
     except (TypeError, ValueError):
         context_window = 0
 
+    try:
+        max_completion_tokens = int(item.get("max_completion_tokens") or item.get("max_tokens") or DEFAULT_MAX_COMPLETION_TOKENS)
+    except (TypeError, ValueError):
+        max_completion_tokens = DEFAULT_MAX_COMPLETION_TOKENS
+
+    try:
+        thinking_budget_tokens = int(item.get("thinking_budget_tokens") or item.get("thinking_budget") or 0)
+    except (TypeError, ValueError):
+        thinking_budget_tokens = 0
+
     return ModelConfig(
         name=name,
         provider=provider,
@@ -69,6 +82,8 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         api_version=str(item.get("api_version") or "").strip(),
         api_key_env=str(item.get("api_key_env") or "").strip(),
         context_window=max(0, context_window),
+        max_completion_tokens=max(1, max_completion_tokens),
+        thinking_budget_tokens=max(0, thinking_budget_tokens),
     )
 
 
