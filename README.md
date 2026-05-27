@@ -92,7 +92,6 @@ after `/model`. `model` or `deployment` is what Klimt sends to the provider.
       "name": "claude",
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
-      "api_key_env": "ANTHROPIC_AUTH_TOKEN",
       "context_window": 200000
     }
   ]
@@ -106,26 +105,24 @@ Supported `provider` values are:
 - `ollama`
 - `anthropic`
 
-`api_key_env` is the only configured auth mechanism. Do not put secret values in
-`models.json`; put the environment variable name there. Authenticated providers
-(`azure`, `openai`, and `anthropic`) require it. `ollama` does not unless your
+Do not put secret values in `models.json`; put the environment variable name in
+`api_key_env` for API-key based providers. Authenticated providers
+(`azure` and `openai`) require it. `ollama` does not unless your
 OpenAI-compatible endpoint enforces auth.
 
 `openai` can also point at OpenAI-compatible gateways by setting `base_url` and
-`api_key_env`. Anthropic API keys use Anthropic's OpenAI SDK compatibility
-layer. Claude Code OAuth tokens (`sk-ant-oat...`) use Anthropic's native Messages
-API with the required Claude Code OAuth headers.
+`api_key_env`. Anthropic has two modes:
 
-To use a Claude Code subscription OAuth token, generate one with:
+- With `api_key_env`, Klimt uses the configured Anthropic API key through
+  Anthropic's OpenAI SDK compatibility layer.
+- Without `api_key_env`, Klimt performs Anthropic OAuth Authorization Code + PKCE
+  login in the browser, stores the access/refresh tokens in
+  `~/.klimt/anthropic-oauth.json`, refreshes them when expired, and calls
+  Anthropic's native Messages API with Claude Code OAuth headers.
 
-```bash
-claude setup-token
-export ANTHROPIC_AUTH_TOKEN=<token>
-```
-
-and set the Anthropic model entry's `api_key_env` to `ANTHROPIC_AUTH_TOKEN`.
-Do not use Claude web session cookies; Klimt only supports API/OAuth-style
-credentials through Anthropic's API endpoint.
+OAuth token files are written with mode `0600`. Do not use Claude web session
+cookies; Klimt only supports API/OAuth-style credentials through Anthropic's API
+endpoint.
 
 ## Global and project instructions
 

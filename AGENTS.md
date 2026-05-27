@@ -22,8 +22,8 @@ Project-local guidance for AI assistants working on this repo.
 
 - Config is read from `~/.klimt/models.json` by `model_config.py`.
 - Supported providers: `azure`, `openai`, `ollama`, `anthropic`.
-- `api_key_env` is the only configured auth mechanism; do not add inline keys or
-  provider-specific auth env fallbacks.
+- Do not add inline keys or provider-specific auth env fallbacks. API-key based
+  providers use `api_key_env`; Anthropic may omit it to use native OAuth PKCE.
 - No Azure env-only fallback; endpoint config must be in `~/.klimt/models.json`.
 - The value sent as `model` is provider-specific. For Azure it is the deployment
   name, not the public model name.

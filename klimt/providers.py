@@ -9,12 +9,13 @@ from typing import Any, Dict, Iterator
 
 from openai import AzureOpenAI, OpenAI
 
+from . import anthropic_oauth
 from .model_config import ModelConfig, resolve_model_config
 
 
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_OAUTH_BETA = "claude-code-20250219,oauth-2025-04-20"
-CLAUDE_CODE_VERSION = "2.1.75"
+KLIMT_USER_AGENT = "Klimt/0.1"
 
 
 class ChatProvider:
@@ -22,8 +23,8 @@ class ChatProvider:
 
     def __init__(self, config: ModelConfig) -> None:
         self.config = config
-        self._api_key = config.resolved_api_key()
-        self._anthropic_oauth = config.provider == "anthropic" and _is_anthropic_oauth_token(self._api_key)
+        self._anthropic_oauth = config.provider == "anthropic" and not config.api_key_env
+        self._api_key = "" if self._anthropic_oauth else config.resolved_api_key()
         self.client = None if self._anthropic_oauth else self._make_client(config, self._api_key)
 
     @classmethod
@@ -59,7 +60,7 @@ class ChatProvider:
         if self._anthropic_oauth:
             return _anthropic_oauth_complete(
                 self.config,
-                self._api_key,
+                anthropic_oauth.access_token(),
                 messages,
                 max_completion_tokens,
             )
@@ -78,7 +79,7 @@ class ChatProvider:
         if self._anthropic_oauth:
             return _AnthropicOAuthStream(
                 self.config,
-                self._api_key,
+                anthropic_oauth.access_token(),
                 messages,
                 tool_schemas,
                 max_completion_tokens,
@@ -91,10 +92,6 @@ class ChatProvider:
             stream=True,
             stream_options={"include_usage": True},
         )
-
-
-def _is_anthropic_oauth_token(api_key: str) -> bool:
-    return "sk-ant-oat" in api_key
 
 
 def _anthropic_base_url(config: ModelConfig) -> str:
@@ -111,9 +108,7 @@ def _anthropic_headers(api_key: str) -> dict[str, str]:
         "authorization": f"Bearer {api_key}",
         "anthropic-version": ANTHROPIC_VERSION,
         "anthropic-beta": ANTHROPIC_OAUTH_BETA,
-        "anthropic-dangerous-direct-browser-access": "true",
-        "user-agent": f"claude-cli/{CLAUDE_CODE_VERSION}",
-        "x-app": "cli",
+        "user-agent": KLIMT_USER_AGENT,
     }
 
 
