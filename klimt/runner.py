@@ -4,11 +4,13 @@ from __future__ import annotations
 import json
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from . import tools
 from .api_types import Emit
 from .providers import ChatProvider
+
+AgentDispatch = Callable[[str, Dict[str, Any]], str]
 
 
 _NORMAL_FINISH_REASONS = {"stop", "tool_calls", "end_turn", "tool_use", "stop_sequence"}
@@ -33,6 +35,8 @@ def run_turn(
     active_stream_ref: dict[str, Any],
     emit: Emit,
     cwd: str | None = None,
+    tool_schemas: list[dict[str, Any]] | None = None,
+    agent_dispatch: AgentDispatch | None = None,
 ) -> bool:
     """Run one assistant turn, including any tool-call continuations.
 
@@ -52,7 +56,7 @@ def run_turn(
                     for m in history
                 ],
             ],
-            tool_schemas=tools.SCHEMAS,
+            tool_schemas=tool_schemas if tool_schemas is not None else tools.SCHEMAS,
             max_completion_tokens=max_tokens,
         )
         with active_lock:
@@ -185,7 +189,7 @@ def run_turn(
             })
 
         results: Dict[str, str] = {}
-        if not _execute_tool_calls(parsed, results, emit, cancel, cwd):
+        if not _execute_tool_calls(parsed, results, emit, cancel, cwd, agent_dispatch):
             emit({"type": "error", "message": "interrupted"})
             return False
 
@@ -210,6 +214,7 @@ def _execute_tool_calls(
     emit: Emit,
     cancel: threading.Event,
     cwd: str | None,
+    agent_dispatch: AgentDispatch | None,
 ) -> bool:
     """Execute tool calls in barrier groups. Returns False if interrupted."""
     for group in _barrier_groups(parsed):
@@ -217,7 +222,7 @@ def _execute_tool_calls(
             return False
         if len(group) == 1:
             args, v = group[0]
-            results[v["id"]] = tools.run(v["name"], args, cancel, cwd)
+            results[v["id"]] = _dispatch_one(v["name"], args, cancel, cwd, agent_dispatch)
             emit({
                 "type": "tool",
                 "id": v["id"],
@@ -226,10 +231,27 @@ def _execute_tool_calls(
                 "result": results[v["id"]],
             })
         else:
-            _run_parallel(group, results, emit, cancel, cwd)
+            _run_parallel(group, results, emit, cancel, cwd, agent_dispatch)
         if cancel.is_set():
             return False
     return True
+
+
+def _dispatch_one(
+    name: str,
+    args: Dict[str, Any],
+    cancel: threading.Event,
+    cwd: str | None,
+    agent_dispatch: AgentDispatch | None,
+) -> str:
+    if name == "agent":
+        if not agent_dispatch:
+            return "error: no subagents configured"
+        try:
+            return agent_dispatch(name, args)
+        except Exception as e:  # noqa: BLE001
+            return f"error: {type(e).__name__}: {e}"
+    return tools.run(name, args, cancel, cwd)
 
 
 def _run_parallel(
@@ -238,12 +260,13 @@ def _run_parallel(
     emit: Emit,
     cancel: threading.Event,
     cwd: str | None,
+    agent_dispatch: AgentDispatch | None,
 ) -> None:
     """Run a read-only group on a thread pool. Emits completions as they land."""
     workers = min(_MAX_PARALLEL_TOOLS, len(group))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         future_to_item = {
-            pool.submit(tools.run, v["name"], args, cancel, cwd): (args, v)
+            pool.submit(_dispatch_one, v["name"], args, cancel, cwd, agent_dispatch): (args, v)
             for args, v in group
         }
         for future in as_completed(future_to_item):

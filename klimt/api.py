@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
+from . import agent_runner, agents as agents_mod, tools as tools_mod
 from .api_types import Emit
 from .model_config import ModelConfig, resolve_model_config
 from .providers import ChatProvider
@@ -325,6 +326,34 @@ class ChatSession:
         self.max_tokens = config.max_completion_tokens or 4096
         self._provider = ChatProvider(config)
 
+    def _tool_schemas(self) -> list[dict[str, Any]]:
+        schemas = list(tools_mod.SCHEMAS)
+        available = agents_mod.list_agents(self.cwd)
+        if available:
+            schemas.append(_agent_tool_schema(available))
+        return schemas
+
+    def _agent_dispatch(self, name: str, args: Dict[str, Any]) -> str:
+        if name != "agent":
+            return f"error: unknown agent dispatch {name!r}"
+        target = (args.get("name") or "").strip() or "general"
+        task = (args.get("prompt") or args.get("task") or "").strip()
+        if not task:
+            return "error: agent invocation requires a non-empty `prompt`"
+        agent = agents_mod.find_agent(target, self.cwd)
+        if not agent:
+            return f"error: unknown agent {target!r}; use /agents to list available subagents"
+        transcripts_dir = self.store.root / f"{self.session_name}.agents"
+        inv = agent_runner.AgentInvocation(
+            agent=agent,
+            task=task,
+            parent_model=self.model,
+            cwd=self.cwd,
+            cancel=self._cancel,
+            transcripts_dir=transcripts_dir,
+        )
+        return agent_runner.run_agent(inv)
+
     def stream(self, user_text: str, emit: Emit) -> None:
         """Push events for one user turn.
 
@@ -333,7 +362,8 @@ class ChatSession:
           {type: 'text_delta', content: str}
           {type: 'text_end'}
           {type: 'text', content: str}       atomic markdown message
-          {type: 'tool', name, args, result}
+          {type: 'tool_start', id, name, args}
+          {type: 'tool', id, name, args, result}
           {type: 'error', message: str}
         """
         self._cancel.clear()
@@ -348,6 +378,40 @@ class ChatSession:
             active_stream_ref=self._active_stream_ref,
             emit=emit,
             cwd=self.cwd,
+            tool_schemas=self._tool_schemas(),
+            agent_dispatch=self._agent_dispatch,
         )
         if completed:
             self.persist()
+
+
+def _agent_tool_schema(available: list[agents_mod.Agent]) -> dict[str, Any]:
+    names = [a.name for a in available]
+    return {
+        "type": "function",
+        "function": {
+            "name": "agent",
+            "description": (
+                "Delegate a focused task to a subagent. The subagent runs with "
+                "its own scoped tools and a turn budget, then returns a Markdown "
+                "report. Use `/agents` to inspect available agents. Subagents "
+                "do not see the parent conversation history, so include all "
+                "context the agent needs in `prompt`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": f"Subagent to invoke. One of: {', '.join(names)}.",
+                        "enum": names,
+                    },
+                    "prompt": {
+                        "type": "string",
+                        "description": "Task description and any context the subagent needs. Be specific.",
+                    },
+                },
+                "required": ["name", "prompt"],
+            },
+        },
+    }

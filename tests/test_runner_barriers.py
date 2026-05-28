@@ -68,7 +68,7 @@ def test_execute_tool_calls_preserves_order(monkeypatch):
     results: dict[str, str] = {}
     events: list[dict] = []
     ok = runner._execute_tool_calls(
-        parsed, results, events.append, threading.Event(), None
+        parsed, results, events.append, threading.Event(), None, None
     )
     assert ok
     assert results == {"1": "read:a", "2": "read:b", "3": "read:c"}
@@ -93,6 +93,6 @@ def test_execute_tool_calls_sequential_for_mutating(monkeypatch):
     ]
     results: dict[str, str] = {}
     events: list[dict] = []
-    runner._execute_tool_calls(parsed, results, events.append, threading.Event(), None)
+    runner._execute_tool_calls(parsed, results, events.append, threading.Event(), None, None)
     # edit must complete after the first read and before the trailing read.
     assert order == ["read", "edit", "read"]

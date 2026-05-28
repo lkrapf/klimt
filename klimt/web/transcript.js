@@ -139,6 +139,11 @@ function summarizeArgs(name, args) {
     if (args.case_insensitive) parts.push("-i");
     return parts.join(" ");
   }
+  if (name === "agent") {
+    const head = "agent " + (args.name ?? "");
+    const prompt = (args.prompt ?? "").replace(/\s+/g, " ").trim();
+    return prompt ? head + ": " + (prompt.length > 80 ? prompt.slice(0, 80) + "\u2026" : prompt) : head;
+  }
   try { return JSON.stringify(args); } catch (_) { return String(args); }
 }
 
