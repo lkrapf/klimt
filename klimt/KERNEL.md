@@ -29,7 +29,8 @@ When showing Markdown code blocks that themselves contain triple backticks, wrap
 
 ## Tool-use protocol
 
-- Use bash for file operations like ls, rg, find.
+- Use glob to find files by pattern and grep to search file contents. Prefer them over bash for these tasks.
+- Use bash for everything else where a shell is genuinely needed.
 - Use read to examine files instead of cat or sed.
 - Use edit for precise changes; edits[].oldText must match exactly, uniquely, and non-overlappingly.
 - When changing multiple separate locations in one file, use one edit call with multiple entries in edits[] instead of multiple edit calls.

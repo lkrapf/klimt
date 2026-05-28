@@ -1,12 +1,14 @@
 """Tool implementations exposed to the model.
 
-Tools: read, edit, write, bash, webfetch, websearch. Each returns a string. Errors are returned
-as strings (not raised) so the model can see them and recover.
+Tools: read, edit, write, bash, webfetch, websearch, glob, grep. Each returns
+a string. Errors are returned as strings (not raised) so the model can see
+them and recover.
 """
 from __future__ import annotations
 
 import html.parser
 import os
+import shutil
 import signal
 import subprocess
 import time
@@ -24,6 +26,10 @@ WEBFETCH_MAX_TEXT_CHARS = 200_000
 WEBFETCH_MAX_LINKS = 40
 READ_MAX_LINES = 2000
 READ_MAX_BYTES = 50_000
+GLOB_MAX_RESULTS = 500
+GREP_TIMEOUT = 30  # seconds
+GREP_MAX_LINES = 500
+GREP_MAX_BYTES = 200_000
 
 SCHEMAS = [
     {
@@ -123,6 +129,38 @@ SCHEMAS = [
                     "query": {"type": "string", "description": "Search query."},
                 },
                 "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "glob",
+            "description": f"List files matching a shell-style glob pattern. Supports `**` for recursive matches. Returns up to {GLOB_MAX_RESULTS} paths relative to the search root, sorted by most recently modified first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Glob pattern, e.g. `**/*.py` or `src/**/test_*.py`."},
+                    "path": {"type": "string", "description": "Optional search root, defaults to the current working directory."},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "grep",
+            "description": f"Search file contents for a regex pattern using `ag` (the_silver_searcher). Returns matching lines with file path and line number. Output is bounded to {GREP_MAX_LINES} lines and {GREP_MAX_BYTES} bytes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Regular expression to search for."},
+                    "path": {"type": "string", "description": "Optional file or directory to search; defaults to the current working directory."},
+                    "glob": {"type": "string", "description": "Optional filename glob to limit which files are searched, e.g. `*.py`."},
+                    "case_insensitive": {"type": "boolean", "description": "Match case-insensitively."},
+                },
+                "required": ["pattern"],
             },
         },
     },
@@ -517,6 +555,139 @@ def _kill_process_tree(p: subprocess.Popen[str]) -> None:
         p.kill()
 
 
+def _glob(pattern: str, search_path: str | None, cwd: str | None) -> str:
+    pattern = (pattern or "").strip()
+    if not pattern:
+        return "error: empty pattern"
+    root = _resolve_path(search_path or ".", cwd)
+    if not root.exists():
+        return f"error: path does not exist: {root}"
+    if not root.is_dir():
+        return f"error: not a directory: {root}"
+
+    matches: list[Path] = []
+    try:
+        # Path.glob honours `**` for recursive matches and treats it as the
+        # explicit "any number of directories" pattern, which is what callers expect.
+        for p in root.glob(pattern):
+            matches.append(p)
+            if len(matches) > GLOB_MAX_RESULTS * 4:
+                # Guard against pathological patterns; we still sort below.
+                break
+    except (OSError, ValueError) as e:
+        return f"error: {type(e).__name__}: {e}"
+
+    def _mtime(p: Path) -> float:
+        try:
+            return p.stat().st_mtime
+        except OSError:
+            return 0.0
+
+    matches.sort(key=_mtime, reverse=True)
+    truncated = len(matches) > GLOB_MAX_RESULTS
+    matches = matches[:GLOB_MAX_RESULTS]
+
+    if not matches:
+        return f"no matches for {pattern!r} under {root}"
+
+    lines = [f"root: {root}", f"pattern: {pattern}", f"matches: {len(matches)}{' (truncated)' if truncated else ''}", ""]
+    for p in matches:
+        try:
+            rel = p.relative_to(root)
+        except ValueError:
+            rel = p
+        suffix = "/" if p.is_dir() else ""
+        lines.append(f"{rel}{suffix}")
+    if truncated:
+        lines.append(f"[truncated to {GLOB_MAX_RESULTS} most recent matches]")
+    return "\n".join(lines)
+
+
+def _grep(
+    pattern: str,
+    *,
+    path: str | None,
+    glob_filter: str | None,
+    case_insensitive: bool,
+    cancel: Event | None,
+    cwd: str | None,
+) -> str:
+    pattern = pattern or ""
+    if not pattern:
+        return "error: empty pattern"
+    ag = shutil.which("ag")
+    if not ag:
+        return (
+            "error: `ag` (the_silver_searcher) is not installed; install it to use grep "
+            "(macOS: `brew install the_silver_searcher`; Debian/Ubuntu: `apt install silversearcher-ag`)"
+        )
+
+    target = _resolve_path(path or ".", cwd)
+    if not target.exists():
+        return f"error: path does not exist: {target}"
+
+    args = [ag, "--nocolor", "--numbers", "--noheading", "--silent"]
+    if case_insensitive:
+        args.append("-i")
+    if glob_filter:
+        args.extend(["-G", glob_filter])
+    args.append("--")
+    args.append(pattern)
+    args.append(str(target))
+
+    try:
+        p = subprocess.Popen(
+            args,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            start_new_session=True,
+        )
+    except FileNotFoundError:
+        return "error: `ag` is not installed"
+
+    deadline = time.monotonic() + GREP_TIMEOUT
+    while p.poll() is None:
+        if cancel and cancel.is_set():
+            _kill_process_tree(p)
+            return "error: interrupted"
+        if time.monotonic() >= deadline:
+            _kill_process_tree(p)
+            return f"error: grep timed out after {GREP_TIMEOUT}s"
+        time.sleep(0.05)
+
+    stdout, stderr = p.communicate()
+    # ag exits 1 when no matches are found; not an error.
+    if p.returncode not in (0, 1):
+        err = stderr.strip() or f"ag exited with status {p.returncode}"
+        return f"error: {err}"
+
+    if not stdout:
+        return f"no matches for {pattern!r} under {target}"
+
+    lines = stdout.splitlines()
+    truncated_lines = len(lines) > GREP_MAX_LINES
+    lines = lines[:GREP_MAX_LINES]
+    body = "\n".join(lines)
+    truncated_bytes = False
+    if len(body.encode("utf-8")) > GREP_MAX_BYTES:
+        body = body.encode("utf-8")[:GREP_MAX_BYTES].decode("utf-8", errors="ignore")
+        truncated_bytes = True
+
+    header = [f"pattern: {pattern}", f"path: {target}"]
+    if glob_filter:
+        header.append(f"glob: {glob_filter}")
+    header.append(f"matches: {len(lines)}")
+    notes = []
+    if truncated_lines:
+        notes.append(f"line limit {GREP_MAX_LINES}")
+    if truncated_bytes:
+        notes.append(f"byte limit {GREP_MAX_BYTES}")
+    if notes:
+        header.append(f"[truncated: {' / '.join(notes)}]")
+    return "\n".join(header) + "\n\n" + body
+
+
 def _bash(command: str, cancel: Event | None = None, cwd: str | None = None) -> str:
     workdir = Path(cwd or os.getcwd()).expanduser()
     if not workdir.exists() or not workdir.is_dir():
@@ -561,6 +732,17 @@ def run(name: str, args: Dict[str, Any], cancel: Event | None = None, cwd: str |
             return _webfetch(args["url"])
         if name == "websearch":
             return _websearch(args["query"])
+        if name == "glob":
+            return _glob(args["pattern"], args.get("path"), cwd)
+        if name == "grep":
+            return _grep(
+                args["pattern"],
+                path=args.get("path"),
+                glob_filter=args.get("glob"),
+                case_insensitive=bool(args.get("case_insensitive")),
+                cancel=cancel,
+                cwd=cwd,
+            )
         return f"error: unknown tool {name!r}"
     except Exception as e:  # noqa: BLE001
         return f"error: {type(e).__name__}: {e}"

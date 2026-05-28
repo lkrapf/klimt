@@ -15,7 +15,7 @@ _NORMAL_FINISH_REASONS = {"stop", "tool_calls", "end_turn", "tool_use", "stop_se
 
 # Tools that have no side effects and can be safely parallelized within a
 # barrier group. Anything not in this set forces a sequential barrier.
-READ_ONLY_TOOLS = frozenset({"read", "webfetch", "websearch"})
+READ_ONLY_TOOLS = frozenset({"read", "glob", "grep", "webfetch", "websearch"})
 
 # Cap parallel read-only tool execution. The bottleneck is usually the network
 # (webfetch/websearch); the threads themselves are cheap.

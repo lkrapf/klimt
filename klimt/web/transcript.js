@@ -130,6 +130,15 @@ function summarizeArgs(name, args) {
   if (name === "read")  return "read " + (args.path ?? "");
   if (name === "write") return "write " + (args.path ?? "") +
                               " (" + (args.content?.length ?? 0) + " bytes)";
+  if (name === "glob")  return "glob " + (args.pattern ?? "") +
+                              (args.path ? " in " + args.path : "");
+  if (name === "grep") {
+    const parts = ["grep " + JSON.stringify(args.pattern ?? "")];
+    if (args.path) parts.push("in " + args.path);
+    if (args.glob) parts.push("glob=" + args.glob);
+    if (args.case_insensitive) parts.push("-i");
+    return parts.join(" ");
+  }
   try { return JSON.stringify(args); } catch (_) { return String(args); }
 }
 
