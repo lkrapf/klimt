@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  klimt macOS app icon.
+  Renders the same mark used in the header and welcome banner,
+  in the same terminal font and palette:
+    Menlo (the actual fallback users see)
+    dim  #b07a1c brackets
+    hot  #ffe48a core
+    bg   #150a00 warm dark backdrop
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <clipPath id="squircle">
+      <rect x="100" y="100" width="824" height="824" rx="180" ry="180"/>
+    </clipPath>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#2a1500"/>
+      <stop offset="1" stop-color="#0e0700"/>
+    </linearGradient>
+    <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#b07a1c" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#b07a1c" stop-opacity="0.10"/>
+    </linearGradient>
+  </defs>
+
+  <g clip-path="url(#squircle)">
+    <rect x="100" y="100" width="824" height="824" fill="url(#bg)"/>
+
+    <text x="512" y="512"
+          font-family="Menlo, 'IBM Plex Mono', monospace"
+          font-size="320"
+          font-weight="normal"
+          text-anchor="middle"
+          dominant-baseline="central"
+          xml:space="preserve"><tspan fill="#b07a1c">[</tspan><tspan fill="#ffe48a">|&lt;</tspan><tspan fill="#b07a1c">]</tspan></text>
+  </g>
+
+  <rect x="100" y="100" width="824" height="824" rx="180" ry="180"
+        fill="none" stroke="url(#rim)" stroke-width="3"/>
+</svg>
