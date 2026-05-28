@@ -41,6 +41,14 @@ STATUS_ERROR = "error"
 STATUS_INTERRUPTED = "interrupted"
 STATUS_MAX_TURNS = "max_turns"
 
+# Prompt used for the forced synthesis turn after the turn budget is hit.
+_SYNTHESIS_NUDGE = (
+    "Your turn budget is exhausted. Do not call any more tools. Using only what "
+    "you already know from prior tool results, write the final Markdown report "
+    "now. If you could not complete the task, say so plainly and state what is "
+    "missing."
+)
+
 # Same parallel ceiling as the parent runner for read-only barrier groups.
 _MAX_PARALLEL_TOOLS = 8
 
@@ -220,9 +228,22 @@ def run_agent(inv: AgentInvocation) -> str:
                 status = STATUS_INTERRUPTED
                 break
         else:
-            # for/else: ran out of turns without breaking.
+            # for/else: ran out of turns without breaking. Force a final
+            # synthesis turn with no tools so the model produces prose instead
+            # of returning an empty result.
             status = STATUS_MAX_TURNS
-            final_text = _last_assistant_text(history) or "(no final text; turn budget exhausted)"
+            final_text = _force_synthesis(
+                provider=provider,
+                system=system,
+                history=history,
+                max_completion_tokens=max_completion_tokens,
+                cancel=inv.cancel,
+            )
+            if not final_text:
+                final_text = (
+                    _last_assistant_text(history)
+                    or "(no final text; turn budget exhausted)"
+                )
     except Exception as e:  # noqa: BLE001 - return as error metadata, don't crash the parent
         status = STATUS_ERROR
         error_msg = f"{type(e).__name__}: {e}"
@@ -417,6 +438,46 @@ def _msg_for_provider(msg: dict[str, Any], provider: ChatProvider) -> dict[str, 
         if msg.get("reasoning_signature"):
             out["reasoning_signature"] = msg["reasoning_signature"]
     return out
+
+
+def _force_synthesis(
+    *,
+    provider: ChatProvider,
+    system: str,
+    history: list[dict[str, Any]],
+    max_completion_tokens: int,
+    cancel: threading.Event,
+) -> str:
+    """Run one extra turn with no tool schemas to force a final answer.
+
+    Appends the synthesis nudge to history (and the model's response) so the
+    transcript reflects what actually happened. Returns the prose content, or
+    an empty string on cancel/empty response.
+    """
+    if cancel.is_set():
+        return ""
+    history.append({"role": "user", "content": _SYNTHESIS_NUDGE})
+    try:
+        assistant_entry, tool_calls = _run_subagent_turn(
+            provider=provider,
+            system=system,
+            history=history,
+            schemas=[],
+            max_completion_tokens=max_completion_tokens,
+            cancel=cancel,
+        )
+    except Exception as e:  # noqa: BLE001 - surfaced in transcript notes via outer handler
+        history.append({
+            "role": "assistant",
+            "content": f"(synthesis turn failed: {type(e).__name__}: {e})",
+        })
+        return ""
+    history.append(assistant_entry)
+    if tool_calls:
+        # The model ignored the no-tools instruction. Drop the orphan tool_calls
+        # from the entry so the transcript doesn't claim work happened.
+        assistant_entry.pop("tool_calls", None)
+    return (assistant_entry.get("content") or "").strip()
 
 
 def _last_assistant_text(history: list[dict[str, Any]]) -> str:

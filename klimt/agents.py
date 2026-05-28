@@ -28,7 +28,7 @@ FULL_TOOLS: tuple[str, ...] = ALL_TOOLS
 
 MUTATING_TOOLS = frozenset({"edit", "write", "bash"})
 
-DEFAULT_MAX_TURNS = 3
+DEFAULT_MAX_TURNS = 6
 
 USER_AGENTS_DIR = Path.home() / ".klimt" / "agents"
 PROJECT_AGENTS_REL = Path(".klimt") / "agents"

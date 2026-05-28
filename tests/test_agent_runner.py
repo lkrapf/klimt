@@ -180,8 +180,8 @@ def test_run_agent_uses_tool_then_finishes(tmp_path, monkeypatch):
     assert called == [("glob", {"pattern": "*.py"})]
 
 
-def test_run_agent_max_turns(tmp_path, monkeypatch):
-    # Agent keeps calling tools forever; we cap turns at 2.
+def test_run_agent_max_turns_synthesis(tmp_path, monkeypatch):
+    # Agent keeps calling tools forever, hits the cap, then synthesizes.
     agent = agents_mod.Agent(
         name="loopy",
         description="never stops",
@@ -192,6 +192,7 @@ def test_run_agent_max_turns(tmp_path, monkeypatch):
     provider = _FakeProvider(scripts=[
         [_tool_chunk("c1", "read", '{"path": "a"}')],
         [_tool_chunk("c2", "read", '{"path": "b"}')],
+        [_text_chunk("partial findings: a and b were read", finish="stop")],
     ])
     _patch_provider_and_config(monkeypatch, provider)
     monkeypatch.setattr(agent_runner.tools_mod, "run", lambda *a, **k: "ok")
@@ -200,6 +201,44 @@ def test_run_agent_max_turns(tmp_path, monkeypatch):
     out = agent_runner.run_agent(inv)
     assert "status: max_turns" in out
     assert "hit turn budget" in out
+    assert "partial findings: a and b were read" in out
+    # The synthesis call was made with no tool schemas.
+    assert provider._idx == 3
+    assert provider.calls[-1]["tool_schemas"] == []
+
+
+def test_run_agent_synthesis_ignores_late_tool_calls(tmp_path, monkeypatch):
+    """If the model emits tool_calls during synthesis, we accept only its prose."""
+    agent = agents_mod.Agent(
+        name="loopy",
+        description="never stops",
+        tools=("read",),
+        body="",
+        max_turns=1,
+    )
+    # First turn: tool call. Synthesis turn: prose AND an ignored tool call.
+    synth_chunk = _FakeChunk(
+        choices=[_FakeChoice(
+            delta=_FakeDelta(
+                content="my best guess",
+                tool_calls=[_FakeToolCall(
+                    index=0, id="ignored", function=_FakeFunction(name="read", arguments="{}"),
+                )],
+            ),
+            finish_reason="tool_calls",
+        )],
+    )
+    provider = _FakeProvider(scripts=[
+        [_tool_chunk("c1", "read", '{"path": "a"}')],
+        [synth_chunk],
+    ])
+    _patch_provider_and_config(monkeypatch, provider)
+    monkeypatch.setattr(agent_runner.tools_mod, "run", lambda *a, **k: "ok")
+
+    inv = _make_inv(tmp_path, agent)
+    out = agent_runner.run_agent(inv)
+    assert "status: max_turns" in out
+    assert "my best guess" in out
 
 
 def test_run_agent_unknown_model(tmp_path, monkeypatch):
