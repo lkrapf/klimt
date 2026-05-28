@@ -14,7 +14,7 @@ from typing import Any
 
 import webview
 
-from . import __version__, commands, completion, prompt, skills, tools
+from . import __version__, agents, commands, completion, prompt, skills, tools
 from .api import ChatSession
 from .model_config import default_model_name, list_model_configs, list_model_names
 
@@ -23,7 +23,13 @@ ASSETS_DIR = Path(__file__).parent / "assets"
 ICON_PATH = ASSETS_DIR / "klimt-icon.png"
 
 def _build_system_prompt(cwd: str | None = None) -> str:
-    return prompt.build_system_prompt(tools.SCHEMAS, skills.list_skills(), cwd=cwd)
+    catalog = agents.build_catalog_manifest(agents.list_agents(cwd))
+    return prompt.build_system_prompt(
+        tools.SCHEMAS,
+        skills.list_skills(),
+        cwd=cwd,
+        agent_manifest=catalog,
+    )
 
 
 def _new_session(cwd: str | None = None) -> ChatSession:
@@ -178,6 +184,9 @@ class _SingleTabApi:
         if command == "/skills":
             self._skills()
             return True
+        if command == "/agents":
+            self._agents()
+            return True
         if command == "/reload":
             self._reload()
             return True
@@ -323,6 +332,22 @@ class _SingleTabApi:
             return
 
         self._emit({"type": "text", "content": self._format_skills_table(items)})
+
+    def _agents(self) -> None:
+        items = agents.list_agents(self._session.cwd)
+        lines = [
+            "## Available agents",
+            "",
+            "| agent | mode | tools | description | source |",
+            "|---|---|---|---|---|",
+        ]
+        for a in items:
+            tools_label = ", ".join(a.tools) if a.tools else "none"
+            desc = self._md_escape(a.description or "(no description)")
+            lines.append(
+                f"| `{self._md_escape(a.name)}` | {a.mode} | {self._md_escape(tools_label)} | {desc} | {a.source} |"
+            )
+        self._emit({"type": "text", "content": "\n".join(lines)})
 
     def _format_skills_table(self, items: list[dict[str, Any]]) -> str:
         lines = [

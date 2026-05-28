@@ -23,6 +23,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/help", "/help", "Show command help.", "allow"),
     CommandSpec("/hotkeys", "/hotkeys", "Show keyboard shortcuts.", "allow"),
     CommandSpec("/skills", "/skills", "List available skills with short descriptions.", "allow"),
+    CommandSpec("/agents", "/agents", "List available subagents (built-in, user, and project).", "allow"),
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
     CommandSpec("/cd", "/cd [path]", "Show or change the current working directory for this session."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),

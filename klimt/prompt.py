@@ -121,11 +121,13 @@ def build_system_prompt(
     skill_items: Iterable[dict[str, Any]],
     start: Path | None = None,
     cwd: str | None = None,
+    agent_manifest: str = "",
 ) -> str:
     parts = [
         _read_text_if_exists(KERNEL_PROMPT_PATH),
         build_tools_manifest(tool_schemas, cwd),
         build_skills_manifest(skill_items),
+        agent_manifest,
         _section("Global user profile", load_global_profile()),
         _section("Project instructions", load_project_agents(start)),
     ]
