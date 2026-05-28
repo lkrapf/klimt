@@ -82,6 +82,12 @@ class _FakeModelConfig:
     max_completion_tokens: int = 1024
 
 
+@dataclass
+class _FakeResolvedConfig:
+    name: str
+    max_completion_tokens: int = 1024
+
+
 # ---------------------------------------------------------------------------
 # Schema/skill filtering and prompt assembly
 # ---------------------------------------------------------------------------
@@ -258,6 +264,55 @@ def test_run_agent_unknown_model(tmp_path, monkeypatch):
     out = agent_runner.run_agent(inv)
     assert "status: error" in out
     assert "not configured" in out
+
+
+def test_resolve_model_precedence_override_wins(monkeypatch):
+    """Tool-call override beats agent file beats parent."""
+    seen: list[str] = []
+
+    def fake_resolve(name):
+        seen.append(name)
+        return _FakeResolvedConfig(name)
+
+    monkeypatch.setattr(agent_runner, "resolve_model_config", fake_resolve)
+    agent = agents_mod.Agent(name="a", description="", tools=("read",), body="", model="from-file")
+    out = agent_runner._resolve_model(agent, parent_model="parent", override="opus")
+    assert out == "opus"
+    assert seen == ["opus"]  # only the override was resolved
+
+
+def test_resolve_model_precedence_file_then_parent(monkeypatch):
+    monkeypatch.setattr(agent_runner, "resolve_model_config", lambda n: _FakeResolvedConfig(n))
+    agent_with = agents_mod.Agent(name="a", description="", tools=("read",), body="", model="from-file")
+    agent_without = agents_mod.Agent(name="b", description="", tools=("read",), body="")
+    assert agent_runner._resolve_model(agent_with, parent_model="parent") == "from-file"
+    assert agent_runner._resolve_model(agent_without, parent_model="parent") == "parent"
+
+
+def test_resolve_model_bad_override_raises(monkeypatch):
+    def boom(name):
+        raise RuntimeError("nope")
+
+    monkeypatch.setattr(agent_runner, "resolve_model_config", boom)
+    agent = agents_mod.Agent(name="a", description="", tools=("read",), body="")
+    with pytest.raises(ValueError) as excinfo:
+        agent_runner._resolve_model(agent, parent_model="parent", override="nope-class")
+    assert "tool call" in str(excinfo.value)
+    assert "nope-class" in str(excinfo.value)
+
+
+def test_run_agent_uses_override_model(tmp_path, monkeypatch):
+    provider = _FakeProvider(scripts=[[_text_chunk("ok", finish="stop")]])
+    _patch_provider_and_config(monkeypatch, provider)
+    # Override the resolve to return a canonical name we can detect.
+    monkeypatch.setattr(
+        agent_runner, "resolve_model_config",
+        lambda n: _FakeResolvedConfig(name="resolved-from-class" if n == "opus" else n),
+    )
+    inv = _make_inv(tmp_path, agents_mod.builtin_general())
+    inv.model_override = "opus"
+    out = agent_runner.run_agent(inv)
+    assert "model: resolved-from-class" in out
 
 
 def test_run_agent_cancelled_before_start(tmp_path, monkeypatch):

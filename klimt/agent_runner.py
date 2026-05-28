@@ -65,6 +65,7 @@ class AgentInvocation:
     cwd: str
     cancel: threading.Event
     transcripts_dir: Path
+    model_override: str | None = None
 
 
 def filtered_tool_schemas(allowed: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -91,18 +92,36 @@ def _transcript_path(transcripts_dir: Path, agent_name: str) -> Path:
     return transcripts_dir / f"{stamp}-{agent_name}-{_short_id()}.md"
 
 
-def _resolve_model(agent: agents_mod.Agent, parent_model: str) -> str:
-    if agent.model:
-        # Validate it exists. Surface a clear error rather than silently
-        # falling back to the parent model.
+def _resolve_model(
+    agent: agents_mod.Agent,
+    parent_model: str,
+    override: str | None = None,
+) -> str:
+    """Pick the model for a subagent run.
+
+    Precedence:
+      1. tool-call override (per-invocation)
+      2. agent file's model field
+      3. parent session model
+
+    Override and agent-file values are validated against resolve_model_config,
+    which accepts model names or declared class names. The returned string is
+    the resolved config's canonical name, so downstream lookups are consistent.
+    """
+    for candidate, source in (
+        (override, "tool call"),
+        (agent.model, f"agent {agent.name!r}"),
+    ):
+        if not candidate:
+            continue
         try:
-            resolve_model_config(agent.model)
+            cfg = resolve_model_config(candidate)
         except Exception:
             raise ValueError(
-                f"agent {agent.name!r} requested model {agent.model!r} which is "
-                f"not configured in ~/.klimt/models.json"
+                f"{source} requested model {candidate!r} which is not configured "
+                f"in ~/.klimt/models.json (not a model name or declared class)"
             )
-        return agent.model
+        return cfg.name
     return parent_model
 
 
@@ -149,7 +168,7 @@ def _agent_role_block(agent: agents_mod.Agent) -> str:
 def run_agent(inv: AgentInvocation) -> str:
     """Run one subagent turn loop and return a metadata-wrapped Markdown string."""
     try:
-        model_name = _resolve_model(inv.agent, inv.parent_model)
+        model_name = _resolve_model(inv.agent, inv.parent_model, inv.model_override)
     except ValueError as e:
         return _format_result(
             agent=inv.agent,

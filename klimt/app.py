@@ -338,15 +338,26 @@ class _SingleTabApi:
         lines = [
             "## Available agents",
             "",
-            "| agent | mode | tools | description | source |",
-            "|---|---|---|---|---|",
+            "| agent | mode | tools | model | description | source |",
+            "|---|---|---|---|---|---|",
         ]
         for a in items:
             tools_label = ", ".join(a.tools) if a.tools else "none"
             desc = self._md_escape(a.description or "(no description)")
+            model_label = self._md_escape(a.model or "(inherits parent)")
             lines.append(
-                f"| `{self._md_escape(a.name)}` | {a.mode} | {self._md_escape(tools_label)} | {desc} | {a.source} |"
+                f"| `{self._md_escape(a.name)}` | {a.mode} | {self._md_escape(tools_label)} | {model_label} | {desc} | {a.source} |"
             )
+
+        from .model_config import list_model_classes
+        classes = list_model_classes()
+        if classes:
+            lines.extend([
+                "",
+                "Model classes from `~/.klimt/models.json`: "
+                + ", ".join(f"`{self._md_escape(c)}`" for c in classes)
+                + ". Use as the `model` argument to `agent` or as the `model:` field in an agent file.",
+            ])
         self._emit({"type": "text", "content": "\n".join(lines)})
 
     def _format_skills_table(self, items: list[dict[str, Any]]) -> str:

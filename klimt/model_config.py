@@ -32,6 +32,7 @@ class ModelConfig:
     context_window: int = 0
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     thinking_budget_tokens: int = 0
+    classes: tuple[str, ...] = ()
 
     def provider_model(self) -> str:
         return self.model or self.name
@@ -74,6 +75,8 @@ def _item_to_config(item: Any) -> ModelConfig | None:
     except (TypeError, ValueError):
         thinking_budget_tokens = 0
 
+    classes = _parse_classes(item.get("classes") or item.get("class"))
+
     return ModelConfig(
         name=name,
         provider=provider,
@@ -84,7 +87,27 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         context_window=max(0, context_window),
         max_completion_tokens=max(1, max_completion_tokens),
         thinking_budget_tokens=max(0, thinking_budget_tokens),
+        classes=classes,
     )
+
+
+def _parse_classes(value: Any) -> tuple[str, ...]:
+    if value is None or value == "":
+        return ()
+    if isinstance(value, str):
+        items = [part.strip() for part in value.split(",")]
+    elif isinstance(value, (list, tuple)):
+        items = [str(v).strip() for v in value]
+    else:
+        return ()
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        if not item or item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return tuple(out)
 
 
 def list_model_configs() -> list[ModelConfig]:
@@ -113,6 +136,19 @@ def list_model_names() -> list[str]:
     return [m.name for m in list_model_configs()]
 
 
+def list_model_classes() -> list[str]:
+    """Return all class names declared by any configured model, deduped."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for cfg in list_model_configs():
+        for cls in cfg.classes:
+            if cls in seen or cls in {cfg.name, cfg.model}:
+                continue
+            seen.add(cls)
+            out.append(cls)
+    return out
+
+
 def default_model_name() -> str:
     configured = list_model_configs()
     if not configured:
@@ -129,8 +165,17 @@ def default_model_name() -> str:
 
 
 def resolve_model_config(name: str) -> ModelConfig:
+    """Resolve a model by exact name, provider model string, or declared class.
+
+    Class resolution returns the first configured model that lists the class,
+    in config-file order. Exact name/model matches always win over class matches.
+    """
     requested = (name or "").strip() or default_model_name()
-    for cfg in list_model_configs():
+    configs = list_model_configs()
+    for cfg in configs:
         if requested in {cfg.name, cfg.model}:
+            return cfg
+    for cfg in configs:
+        if requested in cfg.classes:
             return cfg
     raise KeyError(requested)

@@ -12,7 +12,7 @@ from typing import Any, Dict, List
 
 from . import agent_runner, agents as agents_mod, tools as tools_mod
 from .api_types import Emit
-from .model_config import ModelConfig, resolve_model_config
+from .model_config import ModelConfig, list_model_classes, list_model_names, resolve_model_config
 from .providers import ChatProvider
 from .runner import run_turn
 from .session_store import DEFAULT_SESSION, UNTITLED_PREFIX, SessionStore, random_session_name, title_from_prompt
@@ -354,6 +354,7 @@ class ChatSession:
         if not agent:
             return f"error: unknown agent {target!r}; use /agents to list available subagents"
         transcripts_dir = self.store.root / f"{self.session_name}.agents"
+        model_override = (args.get("model") or "").strip() or None
         inv = agent_runner.AgentInvocation(
             agent=agent,
             task=task,
@@ -361,6 +362,7 @@ class ChatSession:
             cwd=self.cwd,
             cancel=self._cancel,
             transcripts_dir=transcripts_dir,
+            model_override=model_override,
         )
         return agent_runner.run_agent(inv)
 
@@ -398,6 +400,19 @@ class ChatSession:
 
 def _agent_tool_schema(available: list[agents_mod.Agent]) -> dict[str, Any]:
     names = [a.name for a in available]
+    model_choices = list_model_names() + list_model_classes()
+    model_property: Dict[str, Any] = {
+        "type": "string",
+        "description": (
+            "Optional model override for this invocation. Accepts a configured "
+            "model name or a model class declared in ~/.klimt/models.json. "
+            "Class names resolve to the first model that declares them. Omit "
+            "to use the agent's configured model, or the parent model if the "
+            "agent has none."
+        ),
+    }
+    if model_choices:
+        model_property["enum"] = model_choices
     return {
         "type": "function",
         "function": {
@@ -407,7 +422,8 @@ def _agent_tool_schema(available: list[agents_mod.Agent]) -> dict[str, Any]:
                 "its own scoped tools and a turn budget, then returns a Markdown "
                 "report. Use `/agents` to inspect available agents. Subagents "
                 "do not see the parent conversation history, so include all "
-                "context the agent needs in `prompt`."
+                "context the agent needs in `prompt`. Use `model` to route "
+                "heavy reasoning to a stronger model and grunt work to a cheaper one."
             ),
             "parameters": {
                 "type": "object",
@@ -421,6 +437,7 @@ def _agent_tool_schema(available: list[agents_mod.Agent]) -> dict[str, Any]:
                         "type": "string",
                         "description": "Task description and any context the subagent needs. Be specific.",
                     },
+                    "model": model_property,
                 },
                 "required": ["name", "prompt"],
             },

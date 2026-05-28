@@ -336,7 +336,7 @@ def build_catalog_manifest(agents: Iterable[Agent]) -> str:
     lines = [
         "# Runtime agent manifest",
         "",
-        "The following subagents are available via the `agent` tool. Each has a fixed tool allowlist; delegate when the task fits an agent's scope.",
+        "The following subagents are available via the `agent` tool. Each has a fixed tool allowlist; delegate when the task fits an agent's scope. Pass `model` to route heavy reasoning to a stronger model and grunt work to a cheaper one; class names like `opus` or `haiku` resolve to whichever model is tagged that way in ~/.klimt/models.json.",
         "",
         "<available_agents>",
     ]
@@ -347,7 +347,9 @@ def build_catalog_manifest(agents: Iterable[Agent]) -> str:
             f"    <description>{xml_escape(a.description or '(no description)')}</description>",
             f"    <mode>{xml_escape(a.mode)}</mode>",
             f"    <tools>{xml_escape(', '.join(a.tools) or 'none')}</tools>",
-            "  </agent>",
         ])
+        if a.model:
+            lines.append(f"    <default_model>{xml_escape(a.model)}</default_model>")
+        lines.append("  </agent>")
     lines.append("</available_agents>")
     return "\n".join(lines)
