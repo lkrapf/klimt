@@ -68,6 +68,9 @@ html, body, .msg, .msg * {
   align-self: center;
   flex: 0 0 auto;
 }
+.logo-bracket { color: var(--dim); }
+.logo-core    { color: var(--hot); }
+.logo-word    { color: var(--hot); }
 #tabs {
   display: flex;
   align-items: stretch;

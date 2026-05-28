@@ -32,7 +32,11 @@ export function addBannerLogo() {
   const div = document.createElement("div");
   div.className = "startup-mark";
   div.setAttribute("aria-label", "klimt");
-  div.textContent = "[|<] klimt";
+  div.innerHTML =
+    '<span class="logo-bracket">[</span>' +
+    '<span class="logo-core">|&lt;</span>' +
+    '<span class="logo-bracket">]</span>' +
+    ' <span class="logo-word">klimt</span>';
   transcript().appendChild(div);
   scrollToBottom();
 }
