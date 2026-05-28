@@ -28,7 +28,7 @@ def complete(session: Any, text: str, cursor: int | None = None) -> dict[str, An
         local_cursor = cursor - command_start
         if after.startswith("/"):
             result = _slash_completion(session, after, local_cursor)
-            if result:
+            if result and result.get("items"):
                 return _offset_result(result, command_start)
         if after.startswith("!"):
             result = _path_completion(session.cwd, after, local_cursor, offset=1, dirs_only=False)
@@ -220,7 +220,7 @@ def _path_candidates(cwd: str, raw_prefix: str, quote: str, dirs_only: bool) -> 
             continue
         if dirs_only and not entry.is_dir():
             continue
-        value = display_parent + entry.name if display_parent else entry.name
+        value = os.path.join(display_parent, entry.name) if display_parent else entry.name
         if entry.is_dir():
             value += "/"
         out.append(_escape_path(value, quote))

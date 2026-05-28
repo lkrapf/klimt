@@ -54,6 +54,26 @@ def test_regular_prompt_path_completion_uses_active_token(tmp_path):
     assert result["range"] == {"start": 5, "end": 7}
 
 
+def test_path_completion_after_trailing_slash_keeps_separator(tmp_path):
+    (tmp_path / "a" / "b" / "c").mkdir(parents=True)
+    (tmp_path / "a" / "bc").mkdir()
+
+    result = completion.complete(FakeSession(str(tmp_path)), "a/b/", 4)
+
+    assert values(result) == ["a/b/c/"]
+    assert result["range"] == {"start": 0, "end": 4}
+
+
+def test_absolute_path_completion_is_not_taken_for_slash_command(tmp_path):
+    (tmp_path / "a" / "b" / "c").mkdir(parents=True)
+
+    text = f"{tmp_path}/a/b/"
+    result = completion.complete(FakeSession(str(tmp_path)), text, len(text))
+
+    assert values(result) == [f"{tmp_path}/a/b/c/"]
+    assert result["range"] == {"start": 0, "end": len(text)}
+
+
 def test_quoted_path_completion_preserves_spaces(tmp_path):
     (tmp_path / "some file.txt").write_text("x")
 
