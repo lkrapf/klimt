@@ -140,9 +140,9 @@ export function addReasoning(text, { done = true } = {}) {
   return h.div;
 }
 
-export function addTool(name, args, result) {
+export function startTool(name, args) {
   const div = document.createElement("div");
-  div.className = "msg tool";
+  div.className = "msg tool pending";
 
   const r = document.createElement("div");
   r.className = "role";
@@ -168,7 +168,10 @@ export function addTool(name, args, result) {
 
   const out = document.createElement("pre");
   out.className = "tool-out";
-  out.textContent = result;
+  const waiting = document.createElement("span");
+  waiting.className = "thinking";
+  waiting.textContent = "running";
+  out.appendChild(waiting);
 
   body.appendChild(call);
   body.appendChild(out);
@@ -176,7 +179,20 @@ export function addTool(name, args, result) {
   div.appendChild(body);
   transcript().appendChild(div);
   scrollToBottom();
-  return div;
+  return { div, out };
+}
+
+export function finalizeTool(handle, result) {
+  if (!handle) return null;
+  handle.div.classList.remove("pending");
+  handle.out.textContent = result;
+  scrollToBottom();
+  return handle.div;
+}
+
+export function addTool(name, args, result) {
+  const handle = startTool(name, args);
+  return finalizeTool(handle, result);
 }
 
 export function startReasoning() {

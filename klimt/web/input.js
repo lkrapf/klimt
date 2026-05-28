@@ -24,6 +24,13 @@ export function finishWork(klimt, tab = activeTab()) {
     finalizeStreaming(tab.current);
     tab.current = null;
   }
+  if (tab.tools && tab.tools.size) {
+    for (const handle of tab.tools.values()) {
+      handle.div.classList.remove("pending");
+      handle.out.textContent = "[interrupted]";
+    }
+    tab.tools.clear();
+  }
   tab.working = false;
   updateActiveStatus(tab);
   input.focus();

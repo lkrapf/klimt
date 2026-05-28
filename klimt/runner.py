@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import threading
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List
 
 from . import tools
@@ -11,6 +12,14 @@ from .providers import ChatProvider
 
 
 _NORMAL_FINISH_REASONS = {"stop", "tool_calls", "end_turn", "tool_use", "stop_sequence"}
+
+# Tools that have no side effects and can be safely parallelized within a
+# barrier group. Anything not in this set forces a sequential barrier.
+READ_ONLY_TOOLS = frozenset({"read", "webfetch", "websearch"})
+
+# Cap parallel read-only tool execution. The bottleneck is usually the network
+# (webfetch/websearch); the threads themselves are cheap.
+_MAX_PARALLEL_TOOLS = 8
 
 
 def run_turn(
@@ -163,29 +172,113 @@ def run_turn(
         if not tool_calls:
             return True
 
-        for _, v in sorted(tool_calls.items()):
-            if cancel.is_set():
-                emit({"type": "error", "message": "interrupted"})
-                return False
-            try:
-                args = json.loads(v["args"] or "{}")
-            except json.JSONDecodeError:
-                args = {"_raw": v["args"]}
-            result = tools.run(v["name"], args, cancel, cwd)
+        ordered = [v for _, v in sorted(tool_calls.items())]
+        parsed = [(_parse_args(v["args"]), v) for v in ordered]
+
+        # Show every pending tool box in declaration order before doing any work.
+        for args, v in parsed:
+            emit({
+                "type": "tool_start",
+                "id": v["id"],
+                "name": v["name"],
+                "args": args,
+            })
+
+        results: Dict[str, str] = {}
+        if not _execute_tool_calls(parsed, results, emit, cancel, cwd):
+            emit({"type": "error", "message": "interrupted"})
+            return False
+
+        for v in ordered:
+            history.append({
+                "role": "tool",
+                "tool_call_id": v["id"],
+                "content": results.get(v["id"], ""),
+            })
+
+
+def _parse_args(raw: str) -> Dict[str, Any]:
+    try:
+        return json.loads(raw or "{}")
+    except json.JSONDecodeError:
+        return {"_raw": raw}
+
+
+def _execute_tool_calls(
+    parsed: list[tuple[Dict[str, Any], Dict[str, str]]],
+    results: Dict[str, str],
+    emit: Emit,
+    cancel: threading.Event,
+    cwd: str | None,
+) -> bool:
+    """Execute tool calls in barrier groups. Returns False if interrupted."""
+    for group in _barrier_groups(parsed):
+        if cancel.is_set():
+            return False
+        if len(group) == 1:
+            args, v = group[0]
+            results[v["id"]] = tools.run(v["name"], args, cancel, cwd)
             emit({
                 "type": "tool",
+                "id": v["id"],
+                "name": v["name"],
+                "args": args,
+                "result": results[v["id"]],
+            })
+        else:
+            _run_parallel(group, results, emit, cancel, cwd)
+        if cancel.is_set():
+            return False
+    return True
+
+
+def _run_parallel(
+    group: list[tuple[Dict[str, Any], Dict[str, str]]],
+    results: Dict[str, str],
+    emit: Emit,
+    cancel: threading.Event,
+    cwd: str | None,
+) -> None:
+    """Run a read-only group on a thread pool. Emits completions as they land."""
+    workers = min(_MAX_PARALLEL_TOOLS, len(group))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        future_to_item = {
+            pool.submit(tools.run, v["name"], args, cancel, cwd): (args, v)
+            for args, v in group
+        }
+        for future in as_completed(future_to_item):
+            args, v = future_to_item[future]
+            try:
+                result = future.result()
+            except Exception as e:  # noqa: BLE001 - defensive; tools.run already returns errors as strings
+                result = f"error: {type(e).__name__}: {e}"
+            results[v["id"]] = result
+            emit({
+                "type": "tool",
+                "id": v["id"],
                 "name": v["name"],
                 "args": args,
                 "result": result,
             })
-            if cancel.is_set():
-                emit({"type": "error", "message": "interrupted"})
-                return False
-            history.append({
-                "role": "tool",
-                "tool_call_id": v["id"],
-                "content": result,
-            })
+
+
+def _barrier_groups(
+    parsed: list[tuple[Dict[str, Any], Dict[str, str]]],
+) -> list[list[tuple[Dict[str, Any], Dict[str, str]]]]:
+    """Group consecutive read-only tool calls; mutating calls form solo barriers."""
+    groups: list[list[tuple[Dict[str, Any], Dict[str, str]]]] = []
+    current: list[tuple[Dict[str, Any], Dict[str, str]]] = []
+    for args, v in parsed:
+        if v["name"] in READ_ONLY_TOOLS:
+            current.append((args, v))
+            continue
+        if current:
+            groups.append(current)
+            current = []
+        groups.append([(args, v)])
+    if current:
+        groups.append(current)
+    return groups
 
 
 def _message_for_provider(msg: dict[str, Any], provider: ChatProvider) -> dict[str, Any]:

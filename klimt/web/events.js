@@ -9,8 +9,10 @@ import {
   clearTranscript,
   finalizeReasoning,
   finalizeStreaming,
+  finalizeTool,
   startReasoning,
   startStreaming,
+  startTool,
   useTranscript,
 } from "./transcript.js";
 
@@ -68,6 +70,7 @@ export function installEventHandler(klimt, finishWork, setInputHistory, submitCo
         tab.current = null;
         tab.reasoning = null;
         tab.pending = null;
+        if (tab.tools) tab.tools.clear();
         break;
       case "input_history":
         setInputHistory(tab, ev.items);
@@ -94,7 +97,7 @@ export function installEventHandler(klimt, finishWork, setInputHistory, submitCo
           setCwd(tab.cwd);
         }
         break;
-      case "tool":
+      case "tool_start": {
         if (tab.reasoning) {
           finalizeReasoning(tab.reasoning);
           tab.reasoning = null;
@@ -103,8 +106,29 @@ export function installEventHandler(klimt, finishWork, setInputHistory, submitCo
           finalizeStreaming(tab.current);
           tab.current = null;
         }
-        addTool(ev.name, ev.args, ev.result);
+        if (!tab.tools) tab.tools = new Map();
+        const handle = startTool(ev.name, ev.args || {});
+        if (ev.id) tab.tools.set(ev.id, handle);
         break;
+      }
+      case "tool": {
+        if (tab.reasoning) {
+          finalizeReasoning(tab.reasoning);
+          tab.reasoning = null;
+        }
+        if (tab.current) {
+          finalizeStreaming(tab.current);
+          tab.current = null;
+        }
+        const handle = ev.id && tab.tools ? tab.tools.get(ev.id) : null;
+        if (handle) {
+          finalizeTool(handle, ev.result);
+          tab.tools.delete(ev.id);
+        } else {
+          addTool(ev.name, ev.args || {}, ev.result);
+        }
+        break;
+      }
       case "error":
         addMessage("error", "**Error:** " + ev.message);
         break;
