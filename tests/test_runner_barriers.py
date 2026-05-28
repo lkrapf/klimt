@@ -35,6 +35,26 @@ def test_barrier_groups_empty():
     assert runner._barrier_groups([]) == []
 
 
+def test_barrier_groups_custom_predicate_groups_agents():
+    """A predicate can mark certain agent calls as read-only so they parallelize."""
+    parsed = [
+        ({"name": "researcher"}, {"id": "1", "name": "agent", "args": ""}),
+        ({"name": "researcher"}, {"id": "2", "name": "agent", "args": ""}),
+        ({"name": "refactorer"}, {"id": "3", "name": "agent", "args": ""}),
+        ({"name": "researcher"}, {"id": "4", "name": "agent", "args": ""}),
+    ]
+
+    def predicate(name, args):
+        return name == "agent" and args.get("name") == "researcher"
+
+    groups = runner._barrier_groups(parsed, predicate)
+    assert [[v["id"] for _, v in g] for g in groups] == [
+        ["1", "2"],
+        ["3"],
+        ["4"],
+    ]
+
+
 def test_parse_args_valid():
     assert runner._parse_args('{"a": 1}') == {"a": 1}
 

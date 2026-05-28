@@ -11,6 +11,7 @@ from .api_types import Emit
 from .providers import ChatProvider
 
 AgentDispatch = Callable[[str, Dict[str, Any]], str]
+ReadOnlyPredicate = Callable[[str, Dict[str, Any]], bool]
 
 
 _NORMAL_FINISH_REASONS = {"stop", "tool_calls", "end_turn", "tool_use", "stop_sequence"}
@@ -37,6 +38,7 @@ def run_turn(
     cwd: str | None = None,
     tool_schemas: list[dict[str, Any]] | None = None,
     agent_dispatch: AgentDispatch | None = None,
+    is_read_only: ReadOnlyPredicate | None = None,
 ) -> bool:
     """Run one assistant turn, including any tool-call continuations.
 
@@ -189,7 +191,8 @@ def run_turn(
             })
 
         results: Dict[str, str] = {}
-        if not _execute_tool_calls(parsed, results, emit, cancel, cwd, agent_dispatch):
+        predicate = is_read_only or _default_is_read_only
+        if not _execute_tool_calls(parsed, results, emit, cancel, cwd, agent_dispatch, predicate):
             emit({"type": "error", "message": "interrupted"})
             return False
 
@@ -215,9 +218,11 @@ def _execute_tool_calls(
     cancel: threading.Event,
     cwd: str | None,
     agent_dispatch: AgentDispatch | None,
+    is_read_only: ReadOnlyPredicate | None = None,
 ) -> bool:
     """Execute tool calls in barrier groups. Returns False if interrupted."""
-    for group in _barrier_groups(parsed):
+    predicate = is_read_only or _default_is_read_only
+    for group in _barrier_groups(parsed, predicate):
         if cancel.is_set():
             return False
         if len(group) == 1:
@@ -285,14 +290,19 @@ def _run_parallel(
             })
 
 
+def _default_is_read_only(name: str, args: Dict[str, Any]) -> bool:  # noqa: ARG001
+    return name in READ_ONLY_TOOLS
+
+
 def _barrier_groups(
     parsed: list[tuple[Dict[str, Any], Dict[str, str]]],
+    is_read_only: ReadOnlyPredicate = _default_is_read_only,
 ) -> list[list[tuple[Dict[str, Any], Dict[str, str]]]]:
     """Group consecutive read-only tool calls; mutating calls form solo barriers."""
     groups: list[list[tuple[Dict[str, Any], Dict[str, str]]]] = []
     current: list[tuple[Dict[str, Any], Dict[str, str]]] = []
     for args, v in parsed:
-        if v["name"] in READ_ONLY_TOOLS:
+        if is_read_only(v["name"], args):
             current.append((args, v))
             continue
         if current:

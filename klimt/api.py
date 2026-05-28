@@ -333,6 +333,16 @@ class ChatSession:
             schemas.append(_agent_tool_schema(available))
         return schemas
 
+    def _is_read_only(self, name: str, args: Dict[str, Any]) -> bool:
+        from .runner import READ_ONLY_TOOLS
+        if name in READ_ONLY_TOOLS:
+            return True
+        if name == "agent":
+            target = (args.get("name") or "").strip() or "general"
+            agent = agents_mod.find_agent(target, self.cwd)
+            return bool(agent and agent.mode != "full")
+        return False
+
     def _agent_dispatch(self, name: str, args: Dict[str, Any]) -> str:
         if name != "agent":
             return f"error: unknown agent dispatch {name!r}"
@@ -380,6 +390,7 @@ class ChatSession:
             cwd=self.cwd,
             tool_schemas=self._tool_schemas(),
             agent_dispatch=self._agent_dispatch,
+            is_read_only=self._is_read_only,
         )
         if completed:
             self.persist()
