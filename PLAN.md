@@ -43,10 +43,70 @@ roadmap theater.
 
 ## Agent architecture
 
-- [ ] Design subagent support.
-- [ ] Define how subagents inherit or receive prompt layers.
-- [ ] Decide whether subagents get separate tool permissions or only separate
-      task context.
+- [x] Design subagent support.
+- [x] Implement subagent support (loader, agent tool, sidecar transcripts,
+      parallel read-mode dispatch, /agents command, native grep/glob).
+
+### Subagent first-cut spec
+
+- Model-callable tool name: `agent`.
+- Default/fallback agent: `general`.
+- Built-ins: only `general`; no built-in reviewer/planner/security/tester cast.
+- Agent definitions:
+  - Load `.klimt/agents/**/*.md` and `~/.klimt/agents/**/*.md` only.
+  - Project agents override user agents; built-in `general` is lowest priority.
+  - Use Markdown files with frontmatter.
+  - Support `name`, `description`, `tools`, `model`, `maxTurns` / `max_turns`, and `skills`.
+  - `tools` is an allowlist. Ignore `disallowedTools` for now.
+  - Unknown tools are ignored with a warning; if all listed tools are unknown, effective tools are `none`.
+- Prompt inheritance:
+  - Include Klimt kernel / harness rules.
+  - Include only the allowed tool manifest.
+  - Include project `AGENTS.md` files.
+  - Do not include global `~/.klimt/AGENTS.md`.
+  - Do not include parent chat history.
+  - Include explicit task/context from the parent.
+  - Include the lightweight skill manifest, analogous to the parent prompt.
+- Skills:
+  - No dedicated skill tool.
+  - Subagents with read-capable tools can load `SKILL.md` files via `read`.
+  - Agent-file `skills:` prioritizes/advertises those skills; it does not preload full skill bodies.
+- Tool modes:
+  - `none`: no tools.
+  - `read`: `read`, `grep`, `glob`, `webfetch`, `websearch`.
+  - `full`: `read`, `grep`, `glob`, `edit`, `write`, `bash`, `webfetch`, `websearch`.
+  - Default mode is `read`.
+  - Subagents never get `agent`; no nested delegation in the first cut.
+- Add native read-only tools:
+  - `glob`: Python implementation, bounded results.
+  - `grep`: `rg` wrapper via `subprocess` without shell, bounded output, clear error if `rg` is missing.
+- Models:
+  - `model: inherit` or omitted uses the parent session model.
+  - Other model values must exactly match configured model names in `~/.klimt/models.json`.
+  - No built-in model families or aliases for now.
+- Max turns:
+  - Configurable per agent with `maxTurns` / `max_turns`.
+  - Default is `3`.
+- Parallelism:
+  - Parallelize read-only tool calls in barrier groups: `read`, `grep`, `glob`, `webfetch`, `websearch`, and `agent` with `none` / `read` tools.
+  - Side-effecting calls remain sequential: `edit`, `write`, `bash`, and `agent` with `full` tools.
+  - Preserve original tool-call result order in history.
+- UI/events:
+  - Add `tool_start` so parallel tools and subagents show pending boxes immediately.
+  - Subagents are not normal tabs in the first cut.
+- Transcripts:
+  - Persist subagent transcripts as sidecar files.
+  - Parent session stores metadata/reference only.
+  - No subagent resume support in the first cut.
+  - Transcripts should be inspectable after app restart when the parent session is resumed.
+- Cancellation:
+  - Parent interrupt cancels active subagents.
+  - Track and close active subagent streams on interrupt.
+- Result format:
+  - Return metadata-wrapped Markdown as the `agent` tool result: status, model, tools, transcript reference, result, and notes.
+- Parent-visible catalog:
+  - Include a lightweight available-agent catalog in the parent prompt, analogous to skills.
+  - Add `/agents` to list available agents.
 
 ## Context management
 
