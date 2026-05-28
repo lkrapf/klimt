@@ -1,4 +1,3 @@
-import { addSelect } from "./selectors.js";
 import { reloadCss, setContextUsage, setCwd, setSessionLabel } from "./status.js";
 import { getTab, updateTab } from "./tabs.js";
 import {
@@ -58,9 +57,6 @@ export function installEventHandler(klimt, finishWork, setInputHistory, submitCo
         break;
       case "text":
         addMessage("assistant", ev.content || "");
-        break;
-      case "select":
-        addSelect({ ...ev, tabId: tab.id }, (command, opts) => submitCommand(command, { ...(opts || {}), tab }));
         break;
       case "message": {
         const role = ev.role || "assistant";

@@ -64,6 +64,11 @@ def _slash_completion(session: Any, text: str, cursor: int) -> dict[str, Any] | 
         arg = _argument_range(text, len(head), cursor)
         return _choice_result(arg, text[arg.start:cursor], list_model_names(), "model")
 
+    if head == "/session":
+        arg = _argument_range(text, len(head), cursor)
+        names = [str(s.get("name") or "") for s in session.list_sessions()]
+        return _choice_result(arg, text[arg.start:cursor], names, "session")
+
     if head == "/sessions":
         parts = _words_before_cursor(text, cursor)
         if len(parts) <= 2:

@@ -20,13 +20,6 @@ git clone <repo-url> klimt
 cd klimt
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-python3 -m klimt
-```
-
-For an editable install with the `klimt` console script:
-
-```bash
 pip install -e .
 klimt
 ```
@@ -213,8 +206,9 @@ skill description.
 | `/hotkeys` | Show keyboard shortcuts. |
 | `/skills` | List discovered skills. |
 | `/compact [N]` | Compact older context, keeping the last N history messages raw. Default: 8. |
-| `/model [name]` | Show or switch the model endpoint for this session. |
+| `/model [name]` | Show configured models or switch the model endpoint for this session. |
 | `/new` | Start a new empty session. |
+| `/session <name>` | Resume a saved session. Use Tab to complete names. |
 | `/sessions` | List saved sessions for this folder. |
 | `/sessions resume <number|name>` | Resume a saved session. |
 | `/sessions delete <number|name>` | Delete a saved session. |

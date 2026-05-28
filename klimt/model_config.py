@@ -19,7 +19,7 @@ DEFAULT_MAX_COMPLETION_TOKENS = 4096
 class ModelConfig:
     """Resolved model endpoint config.
 
-    `name` is the selector shown in `/model`. `model` is the provider-side model
+    `name` is the user-facing name accepted by `/model`. `model` is the provider-side model
     or Azure deployment sent to the API.
     """
 

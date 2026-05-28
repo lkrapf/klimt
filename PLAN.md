@@ -21,7 +21,7 @@ roadmap theater.
   - [ ] Preserve provenance and make forwarded content non-authoritative by default.
   - [ ] Prefer summaries or selected quotes over ambient tab-to-tab chat.
 - [ ] Add optional per-tab instruction overlays / agent presets.
-- [x] Show model/session select boxes only when `/model` or `/session` is invoked.
+- [x] Replace model/session select boxes with tab completion and Markdown listings.
 - [ ] Vendor static copies of frontend dependencies instead of loading them from CDNs.
 - [x] Support Anthropic Claude Code OAuth token auth; do not support Claude web session-cookie auth.
 - [ ] Add CSS theme support.
@@ -31,7 +31,7 @@ roadmap theater.
   - [x] Complete command arguments by command context:
     - `/cd <path>`: directories only, relative to the tab cwd, with `~` expansion.
     - `/model <prefix>`: configured model names from `list_model_configs()`.
-    - `/sessions resume|delete <prefix>`: saved session names from `ChatSession.list_sessions()`; no numeric-index completion needed.
+    - `/session <prefix>` and `/sessions resume|delete <prefix>`: saved session names from `ChatSession.list_sessions()`; no numeric-index completion needed.
   - [x] Complete filesystem paths in `!` shell commands and ordinary prompts.
     - Use lightweight shell-ish token detection around the cursor: respect whitespace, quotes, and backslash escapes enough for path tokens; do not try to parse full shell syntax.
     - Resolve relative candidates against the active tab cwd; expand `~`; append `/` for directories.

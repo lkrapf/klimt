@@ -83,6 +83,13 @@ def test_quoted_path_completion_preserves_spaces(tmp_path):
     assert result["range"] == {"start": 6, "end": 8}
 
 
+def test_session_completes_names():
+    result = completion.complete(FakeSession("/tmp"), "/session a", 10)
+
+    assert values(result) == ["alpha-work"]
+    assert result["range"] == {"start": 9, "end": 10}
+
+
 def test_sessions_complete_names():
     result = completion.complete(FakeSession("/tmp"), "/sessions resume a", 18)
 

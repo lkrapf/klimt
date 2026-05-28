@@ -27,7 +27,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/cd", "/cd [path]", "Show or change the current working directory for this session."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),
     CommandSpec("/new", "/new", "Start a completely new empty session."),
-    CommandSpec("/session", "/session", "Choose a saved session from an interactive selector."),
+    CommandSpec("/session", "/session [name]", "Resume a saved session. Use Tab to complete names."),
     CommandSpec("/sessions", "/sessions [resume|delete|clear] ...", "List, resume, delete, or clear saved sessions for this folder."),
     CommandSpec("/name", "/name [name]", "Show or rename the current session."),
     CommandSpec("/reload", "/reload", "Reload prompt layers, skills, tools, model endpoint, and CSS."),

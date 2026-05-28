@@ -157,8 +157,8 @@ class _SingleTabApi:
         if command == "/new":
             self._new()
             return True
-        if command == "/session":
-            self._session_picker()
+        if command == "/session" or command.startswith("/session "):
+            self._resume_session(command[8:].strip(), usage="/session <name>")
             return True
         if command == "/sessions" or command.startswith("/sessions "):
             self._sessions(command[9:].strip())
@@ -389,27 +389,6 @@ class _SingleTabApi:
             return "unknown"
         return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
 
-    def _session_picker(self) -> None:
-        sessions = self._session.list_sessions()
-        self._session_choices = sessions
-        if not sessions:
-            self._emit({"type": "text", "content": "_no saved sessions for this folder_"})
-            return
-
-        self._emit({
-            "type": "select",
-            "title": "Session",
-            "placeholder": "choose session...",
-            "options": [
-                {
-                    "label": f"{s.get('name') or ''} · {self._format_session_time(s.get('updated'))}",
-                    "value": f"/sessions resume {s.get('name') or ''}",
-                    "current": (s.get("name") or "") == self._session.session_name,
-                }
-                for s in sessions
-            ],
-        })
-
     def _list_sessions(self) -> None:
         sessions = self._session.list_sessions()
         self._session_choices = sessions
@@ -475,7 +454,7 @@ class _SingleTabApi:
 
         cmd, _, rest = arg.partition(" ")
         if cmd == "resume" and rest.strip():
-            self._resume_session(rest.strip())
+            self._resume_session(rest.strip(), usage="/sessions resume <number|name>")
             return
         if cmd == "delete" and rest.strip():
             self._delete_session(rest.strip())
@@ -514,9 +493,9 @@ class _SingleTabApi:
         self._emit({"type": "text", "content": "deleted all sessions for this folder"})
         self._emit({"type": "text", "content": f"new session **{self._md_escape(self._session.session_name)}**"})
 
-    def _resume_session(self, name: str) -> None:
+    def _resume_session(self, name: str, usage: str) -> None:
         if not name:
-            self._emit({"type": "text", "content": "_usage: `/sessions resume <number|name>`_"})
+            self._emit({"type": "text", "content": f"_usage: `{usage}`_"})
             return
 
         requested = name.strip()
@@ -552,19 +531,19 @@ class _SingleTabApi:
             if not choices:
                 self._emit({"type": "text", "content": "_no models configured; create `~/.klimt/models.json`_"})
                 return
-            self._emit({
-                "type": "select",
-                "title": "Model",
-                "placeholder": "choose model...",
-                "options": [
-                    {
-                        "label": f"{cfg.name} · {cfg.provider} · {cfg.provider_model()}",
-                        "value": f"/model {cfg.name}",
-                        "current": cfg.name == self._session.model,
-                    }
-                    for cfg in configs
-                ],
-            })
+            rows = [
+                "## Models",
+                "",
+                "| name | provider | model | current |",
+                "|---|---|---|---|",
+            ]
+            for cfg in configs:
+                current = "yes" if cfg.name == self._session.model else ""
+                rows.append(
+                    f"| `{self._md_escape(cfg.name)}` | `{self._md_escape(cfg.provider)}` | `{self._md_escape(cfg.provider_model())}` | {current} |"
+                )
+            rows.extend(["", "_usage: `/model <name>`; use Tab to complete names._"])
+            self._emit({"type": "text", "content": "\n".join(rows)})
             return
 
         requested = model.strip()
