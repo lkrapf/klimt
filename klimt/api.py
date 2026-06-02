@@ -147,6 +147,10 @@ class ChatSession:
     session_name: str = field(default_factory=random_session_name)
     input_history: List[str] = field(default_factory=list)
     cwd: str = field(default_factory=lambda: str(os.getcwd()))
+    # A session is "kept" once the user deliberately saves it via /save, or
+    # resumes one from disk. Until then it lives only in memory: persist() is a
+    # no-op so casual scratch tabs never litter the session store.
+    kept: bool = False
     store: SessionStore = field(default_factory=SessionStore, repr=False)
     _provider: ChatProvider = field(default=None, init=False, repr=False)
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
@@ -179,9 +183,20 @@ class ChatSession:
         self.interrupt()
 
     def persist(self) -> None:
-        if self._abandoned:
+        if self._abandoned or not self.kept:
             return
         self.store.save(self.session_name, self.history, self.input_history, self.model, self.cwd)
+
+    def keep(self, name: str | None = None) -> None:
+        """Promote an in-memory session to the on-disk store.
+
+        With no name, snapshots under the current (possibly auto-titled) name.
+        """
+        wanted = (name or self.session_name).strip() or random_session_name()
+        if wanted != self.session_name or not self.kept:
+            self.session_name = self.store.unique_name(wanted)
+        self.kept = True
+        self.persist()
 
     def remember_input(self, text: str) -> None:
         text = text.strip()
@@ -204,6 +219,7 @@ class ChatSession:
         if not data:
             return False
         self.session_name = data.get("name") or name or DEFAULT_SESSION
+        self.kept = True
         self.history = data.get("history") or []
         self.input_history = data.get("input_history") or []
         saved_model = (data.get("model") or "").strip()
@@ -218,10 +234,12 @@ class ChatSession:
 
     def rename_session(self, name: str) -> None:
         old = self.session_name
+        was_kept = self.kept
         wanted = name.strip() or random_session_name()
         self.session_name = self.store.unique_name(wanted) if wanted != old else old
+        self.kept = True
         self.persist()
-        if old != self.session_name:
+        if was_kept and old != self.session_name:
             self.store.delete(old)
 
     def list_sessions(self) -> List[Dict[str, Any]]:

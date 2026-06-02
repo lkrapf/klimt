@@ -121,11 +121,11 @@ class _SingleTabApi:
                 if handled:
                     return {"ok": True}
 
-            renamed = self._session.maybe_title_from_first_input(command)
+            self._session.maybe_title_from_first_input(command)
             self._session.remember_input(command)
+            # No-op until the session is kept; auto-titling above only sets the
+            # tab label. Use /save to persist to disk.
             self._session.persist()
-            if renamed:
-                self._emit({"type": "text", "content": f"session named **{self._session.session_name}**"})
             self._sync_input_history()
             with self._busy_lock:
                 if self._busy:
@@ -195,8 +195,8 @@ class _SingleTabApi:
         if command == "/quit":
             self._quit()
             return True
-        if command == "/name" or command.startswith("/name "):
-            self._name(command[5:].strip())
+        if command == "/save" or command.startswith("/save "):
+            self._save(command[5:].strip())
             return True
         if command == "/model" or command.startswith("/model "):
             self._model(command[6:].strip())
@@ -250,6 +250,7 @@ class _SingleTabApi:
         restored.model = old_session.model
         restored.reload_client()
         restored.session_name = old_session.session_name
+        restored.kept = old_session.kept
         restored.input_history = list(old_session.input_history)
         restored.history = copy.deepcopy(old_session.history[:base]) if base is not None else []
         restored.persist()
@@ -547,14 +548,15 @@ class _SingleTabApi:
         self._sync_input_history()
         self._emit({"type": "text", "content": f"resumed session **{self._md_escape(self._session.session_name)}**"})
 
-    def _name(self, name: str) -> None:
-        if not name:
-            current = self._session.session_name
-            self._emit({"type": "text", "content": f"current session: **{current}**\n\n_usage: `/name <session-name>`_"})
-            return
-        self._session.rename_session(name)
+    def _save(self, name: str) -> None:
+        already_kept = self._session.kept
+        self._session.rename_session(name) if name else self._session.keep()
         self._sync_input_history()
-        self._emit({"type": "text", "content": f"session named **{self._session.session_name}**"})
+        if already_kept and not name:
+            state = "saved" if self._session.kept else "not saved (in memory only)"
+            self._emit({"type": "text", "content": f"session **{self._md_escape(self._session.session_name)}** — {state}\n\n_usage: `/save <name>` to rename_"})
+            return
+        self._emit({"type": "text", "content": f"saved session **{self._md_escape(self._session.session_name)}**"})
 
     def _model(self, model: str) -> None:
         configs = list_model_configs()

@@ -92,7 +92,7 @@ Handled before any model call:
 - `/model [name]` — shows or switches the model endpoint.
 - `/new` — starts a new empty session.
 - `/sessions ...` — lists/resumes/deletes/clears sessions for this folder.
-- `/name [name]` — shows or renames the current session.
+- `/save [name]` — saves the session to disk, optionally under a new name.
 - `/reload` — reloads prompt layers, skills, tools, model config, and CSS.
 - `/quit` — exits immediately.
 - `/<skill>` — loads `~/.klimt/skills/<skill>/SKILL.md` into history.

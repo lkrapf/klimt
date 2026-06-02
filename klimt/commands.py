@@ -30,7 +30,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/new", "/new", "Start a completely new empty session."),
     CommandSpec("/session", "/session [name]", "Resume a saved session. Use Tab to complete names."),
     CommandSpec("/sessions", "/sessions [resume|delete|clear] ...", "List, resume, delete, or clear saved sessions for this folder."),
-    CommandSpec("/name", "/name [name]", "Show or rename the current session."),
+    CommandSpec("/save", "/save [name]", "Save this session to disk, optionally under a new name. New sessions are not stored until saved or resumed."),
     CommandSpec("/reload", "/reload", "Reload prompt layers, skills, tools, model endpoint, and CSS."),
     CommandSpec("/quit", "/quit", "Close Klimt."),
     CommandSpec("/<skill>", "/<skill>", "Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation."),

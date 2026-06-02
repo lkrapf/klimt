@@ -213,7 +213,7 @@ skill description.
 | `/sessions resume <number|name>` | Resume a saved session. |
 | `/sessions delete <number|name>` | Delete a saved session. |
 | `/sessions clear confirm` | Delete all saved sessions for this folder and start a new one. |
-| `/name [name]` | Show or rename the current session. |
+| `/save [name]` | Save this session to disk, optionally under a new name. |
 | `/reload` | Reload prompt layers, skills, tools, model config, and CSS. |
 | `/quit` | Close Klimt. |
 | `/<skill>` | Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation. |
