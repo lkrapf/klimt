@@ -309,23 +309,10 @@ class _SingleTabApi:
         }
 
     def _help(self) -> None:
-        self._emit({"type": "text", "content": commands.help_markdown(self._session_help_lines)})
+        self._emit({"type": "text", "content": commands.help_markdown()})
 
     def _hotkeys(self) -> None:
         self._emit({"type": "text", "content": commands.hotkeys_markdown()})
-
-    @staticmethod
-    def _session_help_lines() -> list[str]:
-        return [
-            "",
-            "## `/sessions`",
-            "",
-            "`/sessions` lists saved sessions for this folder. Below the list it shows these subcommands:",
-            "",
-            "- `/sessions resume <number|name>` — resume a session from the latest list, or by name.",
-            "- `/sessions delete <number|name>` — delete a saved session. Deleting the active session starts a new one.",
-            "- `/sessions clear confirm` — delete all saved sessions for this folder and start a new one.",
-        ]
 
     def _skills(self) -> None:
         items = skills.list_skills()
@@ -345,10 +332,10 @@ class _SingleTabApi:
         ]
         for a in items:
             tools_label = ", ".join(a.tools) if a.tools else "none"
-            desc = self._md_escape(a.description or "(no description)")
-            model_label = self._md_escape(a.model or "(inherits parent)")
+            desc = self._table_cell(a.description or "(no description)")
+            model_label = self._table_cell(a.model or "(inherits parent)")
             lines.append(
-                f"| `{self._md_escape(a.name)}` | {a.mode} | {self._md_escape(tools_label)} | {model_label} | {desc} | {a.source} |"
+                f"| `{self._md_escape(a.name)}` | {a.mode} | {self._table_cell(tools_label)} | {model_label} | {desc} | {a.source} |"
             )
 
         from .model_config import list_model_classes
@@ -371,7 +358,7 @@ class _SingleTabApi:
         ]
         for s in items:
             name = self._md_escape(s.get("name") or "")
-            desc = self._md_escape(s.get("description") or "(no description)")
+            desc = self._table_cell(s.get("description") or "(no description)")
             lines.append(f"| `/{name}` | {desc} |")
         return "\n".join(lines)
 
@@ -414,7 +401,14 @@ class _SingleTabApi:
         self._emit({"type": "text", "content": result})
 
     @staticmethod
+    @staticmethod
+    def _table_cell(text: object) -> str:
+        """Minimal escaping for a plain (non-code-span) Markdown table cell."""
+        return str(text or "").replace("|", "\\|")
+
+    @staticmethod
     def _md_escape(text: object) -> str:
+        """Escaping for values embedded in backtick code spans or inline code."""
         return str(text or "").replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|")
 
     @staticmethod
@@ -441,12 +435,12 @@ class _SingleTabApi:
             "|---:|---|---|---:|---:|---:|",
         ]
         for i, s in enumerate(sessions, start=1):
-            name = self._md_escape(s.get("name") or "")
-            model = self._md_escape(s.get("model") or "")
+            name = self._table_cell(s.get("name") or "")
+            model = self._table_cell(s.get("model") or "")
             updated = self._format_session_time(s.get("updated"))
             messages = int(s.get("messages") or 0)
             inputs = int(s.get("inputs") or 0)
-            lines.append(f"| {i} | `{name}` | `{model}` | {updated} | {messages} | {inputs} |")
+            lines.append(f"| {i} | {name} | {model} | {updated} | {messages} | {inputs} |")
         lines.extend([
             "",
             "Commands:",
@@ -578,7 +572,7 @@ class _SingleTabApi:
             for cfg in configs:
                 current = "yes" if cfg.name == self._session.model else ""
                 rows.append(
-                    f"| `{self._md_escape(cfg.name)}` | `{self._md_escape(cfg.provider)}` | `{self._md_escape(cfg.provider_model())}` | {current} |"
+                    f"| {self._table_cell(cfg.name)} | {self._table_cell(cfg.provider)} | {self._table_cell(cfg.provider_model())} | {current} |"
                 )
             rows.extend(["", "_usage: `/model <name>`; use Tab to complete names._"])
             self._emit({"type": "text", "content": "\n".join(rows)})

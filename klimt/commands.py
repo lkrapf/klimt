@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 from . import skills, tools
 
@@ -78,21 +78,12 @@ def command_bullets() -> str:
     return "\n".join(f"- `{usage}` — {description}" for usage, description in command_rows())
 
 
-def help_markdown(format_session_help: Callable[[], list[str]] | None = None) -> str:
-    lines = [
+def help_markdown() -> str:
+    return "\n".join([
         "## Commands",
         "",
         command_markdown_table(),
-    ]
-
-    if format_session_help:
-        lines.extend(format_session_help())
-
-    lines.extend([
-        "",
-        "Keyboard shortcuts moved to `/hotkeys`.",
     ])
-    return "\n".join(lines)
 
 
 def hotkeys_markdown() -> str:

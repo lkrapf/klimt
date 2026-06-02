@@ -20,8 +20,8 @@ export function clearTranscript() {
   transcript().innerHTML = "";
 }
 
-export function escapeMd(text) {
-  return String(text ?? "").replace(/[\\`*_{}\[\]()#+.!|>]/g, "\\$&");
+function tableCell(text) {
+  return String(text ?? "").replace(/\|/g, "\\|");
 }
 
 function codeSpan(text) {
@@ -45,7 +45,7 @@ export function addStartup(info) {
   addBannerLogo();
 
   const lines = [
-    `version ${escapeMd(info.version || "unknown")}`,
+    `version ${info.version || "unknown"}`,
     "",
     "## Available skills",
   ];
@@ -54,8 +54,8 @@ export function addStartup(info) {
   if (skills.length) {
     lines.push("", "| skill | description |", "|---|---|");
     for (const s of skills) {
-      const name = escapeMd(s.name || "unnamed");
-      const desc = escapeMd(s.description || "(no description)");
+      const name = tableCell(s.name || "unnamed");
+      const desc = tableCell(s.description || "(no description)");
       lines.push("| `/" + name + "` | " + desc + " |");
     }
   } else {
@@ -68,7 +68,7 @@ export function addStartup(info) {
     lines.push("", "| command | description |", "|---|---|");
     for (const c of commands) {
       const usage = codeSpan(c.usage || "");
-      const desc = escapeMd(c.description || "");
+      const desc = tableCell(c.description || "");
       lines.push("| " + usage + " | " + desc + " |");
     }
   } else {
@@ -80,8 +80,8 @@ export function addStartup(info) {
   if (tools.length) {
     lines.push("", "| tool | description |", "|---|---|");
     for (const t of tools) {
-      const name = escapeMd(t.name || "unnamed");
-      const desc = escapeMd(t.description || "(no description)");
+      const name = tableCell(t.name || "unnamed");
+      const desc = tableCell(t.description || "(no description)");
       lines.push("| `" + name + "` | " + desc + " |");
     }
   } else {
