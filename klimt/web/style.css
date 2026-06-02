@@ -166,6 +166,7 @@ body.working .status::after {
 
 
 #transcripts {
+  min-width: 0;
   min-height: 0;
   position: relative;
 }
@@ -173,6 +174,7 @@ body.working .status::after {
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
+  min-width: 0;
   min-height: 0;
   height: 100%;
   /* right padding compensates for the 10px scrollbar gutter so the
@@ -192,6 +194,11 @@ body.working .status::after {
 }
 
 .msg, .msg .body { min-width: 0; }
+/* Force long unbreakable tokens (URLs, hashes, base64, no-space paste)
+   to wrap. `overflow-wrap: anywhere` is critical here: unlike `break-word`
+   it shrinks the min-content size, so the flex/grid ancestors can
+   actually narrow and the body stops getting clipped by body{overflow:hidden}. */
+.msg, .msg .body { overflow-wrap: anywhere; }
 .msg pre, .msg .tool-out, .msg .tool-call {
   max-width: 100%;
   overflow-x: auto;
@@ -203,7 +210,6 @@ body.working .status::after {
   border: none;
   background: transparent;
   max-width: 100%;
-  word-wrap: break-word;
 }
 .msg .role {
   font-size: 11px; letter-spacing: 1.5px;
