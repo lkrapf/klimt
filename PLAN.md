@@ -108,6 +108,11 @@ roadmap theater.
   - Include a lightweight available-agent catalog in the parent prompt, analogous to skills.
   - Add `/agents` to list available agents.
 
+## UI
+
+- [ ] Links (and similar activations) must never navigate the Klimt window itself; open externally or not at all.
+- [x] Handle output wider than the window without a horizontal scrollbar. Lean toward forced wrapping; figure out how to do it sanely for code blocks and tool output.
+
 ## Context management
 
 - [ ] Add automatic context compaction threshold.
