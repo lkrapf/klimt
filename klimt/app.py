@@ -8,6 +8,8 @@ import os
 import contextlib
 import threading
 import uuid
+import webbrowser
+from urllib.parse import urlparse
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -705,6 +707,31 @@ class Api:
     def tabs(self) -> dict:
         with self._tabs_lock:
             return {"tabs": [tab.state() for tab in self._tabs.values()], "active_tab": self._first_tab_id}
+
+    # Allowed URL schemes for external open. Anything else is refused so a
+    # rendered link cannot redirect the Klimt window or invoke arbitrary
+    # handlers (file:, javascript:, custom protocols, ...).
+    _ALLOWED_URL_SCHEMES = frozenset({"http", "https", "mailto"})
+
+    def open_url(self, url: str) -> dict:
+        """Open a URL in the user's default browser, never in the Klimt window.
+
+        Called from JS when an anchor in rendered content is clicked. The JS
+        side preventDefaults the navigation regardless; this side validates
+        the scheme before handing off to the OS.
+        """
+        try:
+            target = str(url or "").strip()
+            if not target:
+                return {"ok": False, "error": "empty url"}
+            parsed = urlparse(target)
+            scheme = (parsed.scheme or "").lower()
+            if scheme not in self._ALLOWED_URL_SCHEMES:
+                return {"ok": False, "error": f"refused scheme: {scheme or '(none)'}"}
+            webbrowser.open(target)
+            return {"ok": True}
+        except Exception as e:  # noqa: BLE001
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
 
 
 def _set_macos_icon() -> None:

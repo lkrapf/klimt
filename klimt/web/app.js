@@ -2,6 +2,7 @@
 
 import { installEventHandler } from "./events.js";
 import { finishWork, installInputHandlers, setInputHistory, submitCommand } from "./input.js";
+import { installNavGuard } from "./navguard.js";
 import { showTabStatus } from "./status.js";
 import { activateTab, activeTab, initializeTabs, installTabs } from "./tabs.js";
 import { addStartup, useTranscript } from "./transcript.js";
@@ -16,6 +17,7 @@ installEventHandler(
   (command, opts) => submitCommand(klimt, command, opts),
 );
 installInputHandlers(klimt);
+installNavGuard();
 installTabs({
   activate: (tab) => {
     useTranscript(tab.id);

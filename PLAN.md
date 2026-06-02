@@ -110,7 +110,7 @@ roadmap theater.
 
 ## UI
 
-- [ ] Links (and similar activations) must never navigate the Klimt window itself; open externally or not at all.
+- [x] Links (and similar activations) must never navigate the Klimt window itself; open externally or not at all.
 - [x] Handle output wider than the window without a horizontal scrollbar. Lean toward forced wrapping; figure out how to do it sanely for code blocks and tool output.
 
 ## Context management
