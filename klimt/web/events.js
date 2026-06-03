@@ -1,4 +1,5 @@
-import { reloadCss, setContextUsage, setCwd, setSessionLabel } from "./status.js";
+import { setContextUsage, setCwd, setSessionLabel } from "./status.js";
+import { reloadCss, setTheme } from "./theme.js";
 import { getTab, updateTab } from "./tabs.js";
 import {
   addMessage,
@@ -134,6 +135,9 @@ export function installEventHandler(klimt, finishWork, setInputHistory, submitCo
         break;
       case "reload_css":
         reloadCss();
+        break;
+      case "theme":
+        setTheme(ev.name);
         break;
       case "done":
         tab.suppressUntilDone = false;

@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from . import commands, skills
+from . import commands, skills, themes
 from .model_config import list_model_names
 
 MAX_ITEMS = 100
@@ -63,6 +63,10 @@ def _slash_completion(session: Any, text: str, cursor: int) -> dict[str, Any] | 
     if head == "/model":
         arg = _argument_range(text, len(head), cursor)
         return _choice_result(arg, text[arg.start:cursor], list_model_names(), "model")
+
+    if head == "/theme":
+        arg = _argument_range(text, len(head), cursor)
+        return _choice_result(arg, text[arg.start:cursor], themes.list_theme_names(), "theme")
 
     if head == "/session":
         arg = _argument_range(text, len(head), cursor)

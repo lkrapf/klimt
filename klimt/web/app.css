@@ -1,16 +1,50 @@
-:root {
-  --bg: #150a00;
-  --fg: #ffc94d;
-  --dim: #b07a1c;
-  --hot: #ffe48a;
-  --border: #5a3a00;
-  --mono: "IBM Plex Mono", "Berkeley Mono", "Menlo", ui-monospace, monospace;
-  /* glow temporarily disabled */
-  --glow: none;
-}
+/* ─── app.css ───────────────────────────────────────────────────────────────
+   Structure-only stylesheet, loaded unconditionally for every theme.
+   No palette values live here — all colours come from the active theme via
+   CSS custom properties (var(--bg), var(--fg), var(--dim), var(--hot),
+   var(--border), var(--mono), var(--glow)).  Themes need only define :root
+   vars and their own decorative overrides; they do NOT import each other.
+   ─────────────────────────────────────────────────────────────────────────── */
 
 * { box-sizing: border-box; }
 
+/* ── Page shell ── */
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto auto;
+  height: 100vh;
+  background: var(--bg);
+  color: var(--fg);
+  font: 14px/1.45 var(--mono);
+  text-shadow: var(--glow);
+}
+
+/* Neutral hook — themes that want a full-viewport overlay (scanlines, vignette,
+   paper texture…) fill this in.  Themes that don't simply leave it alone. */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+
+/* ── Selection ── */
+html, body, .msg, .msg * {
+  -webkit-user-select: text;
+  user-select: text;
+  cursor: auto;
+}
+#topbar, #composer { -webkit-user-select: none; user-select: none; }
+#input { -webkit-user-select: text; user-select: text; }
+
+/* ── Scrollbars ── */
 ::-webkit-scrollbar              { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track        { background: transparent; }
 ::-webkit-scrollbar-thumb        {
@@ -21,45 +55,11 @@
 ::-webkit-scrollbar-thumb:hover  { background: var(--dim); }
 ::-webkit-scrollbar-corner       { background: transparent; }
 
-html, body {
-  margin: 0; height: 100%;
-  background: var(--bg);
-  color: var(--fg);
-  font: 14px/1.45 var(--mono);
-  text-shadow: var(--glow);
-  overflow: hidden;
-}
-
-body {
-  display: grid;
-  grid-template-rows: auto 1fr auto auto;
-  height: 100vh;
-}
-
-/* Subtle scanlines + vignette for CRT flavor. */
-body::before {
-  content: "";
-  position: fixed; inset: 0; pointer-events: none; z-index: 10;
-  /* scanlines temporarily disabled
-  background: repeating-linear-gradient(
-    to bottom,
-    rgba(0,0,0,0) 0,
-    rgba(0,0,0,0) 2px,
-    rgba(0,0,0,0.15) 3px
-  );
-  */
-}
-
-html, body, .msg, .msg * {
-  -webkit-user-select: text;
-  user-select: text;
-  cursor: auto;
-}
-#topbar, #composer { -webkit-user-select: none; user-select: none; }
-#input { -webkit-user-select: text; user-select: text; }
-
+/* ── Top bar ── */
 #topbar {
-  display: flex; align-items: stretch; gap: 8px;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   min-width: 0;
@@ -74,6 +74,8 @@ html, body, .msg, .msg * {
 .logo-bracket { color: var(--dim); }
 .logo-core    { color: var(--hot); }
 .logo-word    { color: var(--hot); }
+
+/* ── Tabs ── */
 #tabs {
   display: flex;
   align-items: stretch;
@@ -111,6 +113,7 @@ html, body, .msg, .msg * {
   text-overflow: ellipsis;
   white-space: nowrap;
   flex: 1;
+  min-width: 0;
   text-align: left;
 }
 .tab-close { color: var(--dim); }
@@ -120,6 +123,8 @@ html, body, .msg, .msg * {
   min-width: 28px;
   color: var(--hot);
 }
+
+/* ── Status bar ── */
 #active-status {
   display: flex;
   align-items: center;
@@ -137,7 +142,7 @@ html, body, .msg, .msg * {
 }
 .context { flex: 0 0 auto; }
 .context.warning { color: #ffb347; }
-.context.danger { color: #ff6a3a; }
+.context.danger  { color: #ff6a3a; }
 .status {
   margin-left: auto;
   color: var(--hot);
@@ -148,26 +153,14 @@ body.working .status {
   color: var(--hot);
   animation: working-soft-pulse 1.4s ease-in-out infinite;
 }
-body.working .status::before {
-  content: "[";
-  color: var(--dim);
-}
-body.working .status::after {
-  content: "]";
-  color: var(--dim);
-}
+body.working .status::before { content: "["; color: var(--dim); }
+body.working .status::after  { content: "]"; color: var(--dim); }
 @keyframes working-soft-pulse {
-  0%, 100% {
-    opacity: 0.65;
-    text-shadow: var(--glow);
-  }
-  50% {
-    opacity: 1;
-    text-shadow: var(--glow);
-  }
+  0%, 100% { opacity: 0.65; text-shadow: var(--glow); }
+  50%       { opacity: 1;    text-shadow: var(--glow); }
 }
 
-
+/* ── Transcript / message list ── */
 #transcripts {
   min-width: 0;
   min-height: 0;
@@ -180,8 +173,6 @@ body.working .status::after {
   min-width: 0;
   min-height: 0;
   height: 100%;
-  /* right padding compensates for the 10px scrollbar gutter so the
-     visible message edge lines up with the topbar/composer/status. */
   padding: 14px 2px 14px 12px;
   display: none;
   flex-direction: column;
@@ -196,17 +187,13 @@ body.working .status::after {
   font-size: 24px;
 }
 
-.msg, .msg .body { min-width: 0; }
-/* Force long unbreakable tokens (URLs, hashes, base64, no-space paste)
-   to wrap. `overflow-wrap: anywhere` is critical here: unlike `break-word`
-   it shrinks the min-content size, so the flex/grid ancestors can
-   actually narrow and the body stops getting clipped by body{overflow:hidden}. */
-.msg, .msg .body { overflow-wrap: anywhere; }
-.msg pre, .msg .tool-out, .msg .tool-call {
-  max-width: 100%;
-  overflow-x: auto;
-}
+/* Force long unbreakable tokens (URLs, hashes, base64) to wrap.
+   overflow-wrap:anywhere shrinks min-content size so flex/grid ancestors
+   can narrow without body{overflow:hidden} clipping the content. */
+.msg, .msg .body { min-width: 0; overflow-wrap: anywhere; }
+.msg pre, .msg .tool-out, .msg .tool-call { max-width: 100%; overflow-x: auto; }
 .msg table { display: block; max-width: 100%; overflow-x: auto; }
+.msg img   { max-width: 100%; height: auto; display: block; object-fit: contain; }
 
 .msg {
   padding: 0;
@@ -215,7 +202,8 @@ body.working .status::after {
   max-width: 100%;
 }
 .msg .role {
-  font-size: 11px; letter-spacing: 1.5px;
+  font-size: 11px;
+  letter-spacing: 1.5px;
   color: var(--dim);
   margin-bottom: 2px;
   text-transform: uppercase;
@@ -223,11 +211,15 @@ body.working .status::after {
 .msg.user      .role::before { content: "> "; color: var(--hot); }
 .msg.assistant .role::before { content: "* "; color: var(--hot); }
 .msg.error     .role::before { content: "! "; color: #ff6a3a; }
-.msg.error     { color: #ff8a5a; }
+.msg.error                   { color: #ff8a5a; }
 .msg.tool      .role::before { content: "$ "; color: var(--hot); }
 .msg.tool      .role         { color: var(--hot); }
 .msg.reasoning .role::before { content: "? "; color: var(--dim); }
 .msg.reasoning .role         { color: var(--dim); }
+
+body.hide-reasoning .msg.reasoning { display: none; }
+
+/* ── Reasoning / tool panels ── */
 .msg.reasoning .reasoning-body {
   background: #00000055;
   border: 1px dashed var(--border);
@@ -242,8 +234,7 @@ body.working .status::after {
   overflow: auto;
   text-shadow: none;
 }
-body.hide-reasoning .msg.reasoning { display: none; }
-.msg.tool      .tool-call    {
+.msg.tool .tool-call {
   background: #00000055;
   border: 1px dashed var(--border);
   padding: 8px 10px;
@@ -255,16 +246,24 @@ body.hide-reasoning .msg.reasoning { display: none; }
   max-width: 100%;
   overflow-x: auto;
 }
-.msg.tool      .tool-out     {
-  background: #00000055; border: 1px dashed var(--border);
-  padding: 6px 8px; margin: 4px 0 0;
-  color: var(--dim); white-space: pre-wrap; word-break: break-word;
-  max-height: 320px; overflow: auto;
+.msg.tool .tool-out {
+  background: #00000055;
+  border: 1px dashed var(--border);
+  padding: 6px 8px;
+  margin: 4px 0 0;
+  color: var(--dim);
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-height: 320px;
+  overflow: auto;
 }
 
+/* ── Body copy ── */
 .msg .body.plain { white-space: pre-wrap; }
 .msg .body p:first-child { margin-top: 0; }
 .msg .body p:last-child  { margin-bottom: 0; }
+
+/* ── Code ── */
 .msg pre {
   background: #00000055;
   border: 1px dashed var(--border);
@@ -277,9 +276,6 @@ body.hide-reasoning .msg.reasoning { display: none; }
   padding: 0 4px;
   border: 1px dashed var(--border);
 }
-
-/* syntax-highlighted markdown code blocks
-   Keep highlight.js inside the terminal's amber palette. No rainbow syntax. */
 .msg pre code.hljs {
   display: block;
   overflow-x: visible;
@@ -288,69 +284,46 @@ body.hide-reasoning .msg.reasoning { display: none; }
   color: var(--fg);
 }
 .msg .hljs-comment,
-.msg .hljs-quote {
-  color: var(--dim);
-  font-style: italic;
-}
+.msg .hljs-quote        { color: var(--dim); font-style: italic; }
 .msg .hljs-keyword,
 .msg .hljs-selector-tag,
-.msg .hljs-subst {
-  color: var(--hot);
-  font-weight: bold;
-}
+.msg .hljs-subst        { color: var(--hot); font-weight: bold; }
 .msg .hljs-string,
 .msg .hljs-regexp,
 .msg .hljs-symbol,
-.msg .hljs-bullet {
-  color: var(--fg);
-}
+.msg .hljs-bullet       { color: var(--fg); }
 .msg .hljs-number,
 .msg .hljs-literal,
 .msg .hljs-variable,
 .msg .hljs-template-variable,
-.msg .hljs-attribute {
-  color: #ffb93d;
-}
+.msg .hljs-attribute    { color: #ffb93d; }
 .msg .hljs-title,
 .msg .hljs-section,
 .msg .hljs-name,
 .msg .hljs-selector-id,
-.msg .hljs-selector-class {
-  color: var(--hot);
-}
+.msg .hljs-selector-class { color: var(--hot); }
 .msg .hljs-type,
 .msg .hljs-built_in,
 .msg .hljs-builtin-name,
-.msg .hljs-tag {
-  color: #ffd36a;
-}
+.msg .hljs-tag          { color: #ffd36a; }
 .msg .hljs-meta,
-.msg .hljs-link {
-  color: var(--dim);
-  text-decoration: underline;
-  text-decoration-style: dotted;
-}
-.msg .hljs-emphasis { font-style: italic; }
-.msg .hljs-strong { font-weight: bold; }
+.msg .hljs-link         { color: var(--dim); text-decoration: underline dotted; }
+.msg .hljs-emphasis     { font-style: italic; }
+.msg .hljs-strong       { font-weight: bold; }
 
-.msg a { color: var(--hot); text-decoration: underline; }
-.msg img {
-  max-width: 100%;
-  max-height: 360px;
-  height: auto;
-  display: block;
-  margin: 0.3em 0;
-  border: 1px dashed var(--border);
-  background: #00000033;
-  object-fit: contain;
-}
-.msg hr { border: 0; border-top: 1px dashed var(--border); }
+/* ── Inline elements ── */
+.msg a          { color: var(--hot); text-decoration: underline; }
+.msg strong     { color: var(--hot); font-weight: bold; }
+.msg em         { color: var(--hot); font-style: italic; }
+.msg hr         { border: 0; border-top: 1px dashed var(--border); }
 .msg blockquote {
-  margin: 0; padding-left: 10px;
+  margin: 0;
+  padding-left: 10px;
   border-left: 2px solid var(--border);
   color: var(--dim);
 }
 
+/* ── Headings ── */
 .msg h1, .msg h2, .msg h3, .msg h4, .msg h5, .msg h6 {
   color: var(--hot);
   text-transform: uppercase;
@@ -366,32 +339,32 @@ body.hide-reasoning .msg.reasoning { display: none; }
 .msg h4 { font-size: 1.05em; border-bottom: none; }
 .msg h5, .msg h6 { font-size: 1em; border-bottom: none; }
 
+/* ── Lists ── */
 .msg ul, .msg ol { padding-left: 1.6em; margin: 0.4em 0; }
-.msg li { margin: 0.15em 0; }
-.msg ul { list-style: none; }
-.msg ul > li::before {
-  content: "- "; color: var(--dim); margin-left: -1em;
-}
+.msg li          { margin: 0.15em 0; }
+.msg ul          { list-style: none; }
+.msg ul > li::before { content: "- "; color: var(--dim); margin-left: -1em; }
 
-.msg table {
-  border-collapse: collapse;
-  margin: 0.4em 0;
-}
+/* ── Tables ── */
+.msg table { border-collapse: collapse; margin: 0.4em 0; }
 .msg th, .msg td {
   border: 1px dashed var(--border);
   padding: 3px 8px;
   text-align: left;
 }
 .msg th { color: var(--hot); }
-/* Keep the identifier/name column (skills, tools, commands, agents) on one
-   line. The table is display:block + overflow-x:auto, so it scrolls instead
-   of wrapping short names like `/jeanluc` mid-word under overflow-wrap:anywhere. */
+/* Keep name/identifier column on one line — table is display:block + overflow-x:auto */
 .msg th:first-child, .msg td:first-child { overflow-wrap: normal; white-space: nowrap; }
 
-.msg strong { color: var(--hot); font-weight: bold; }
-.msg em     { color: var(--hot); font-style: italic; }
+/* ── Images ── */
+.msg img {
+  max-height: 360px;
+  margin: 0.3em 0;
+  border: 1px dashed var(--border);
+  background: #00000033;
+}
 
-/* mermaid diagrams */
+/* ── Diagrams / math ── */
 .msg .mermaid {
   background: #00000055;
   border: 1px dashed var(--border);
@@ -401,27 +374,22 @@ body.hide-reasoning .msg.reasoning { display: none; }
 }
 .msg .mermaid svg { max-width: 100%; height: auto; font-size: 11px; }
 .msg .mermaid foreignObject,
-.msg .mermaid foreignObject * {
-  box-sizing: content-box;
-}
-
-/* KaTeX recolor to amber; kill the bright white default */
-.msg .katex {
-  color: var(--fg);
-  text-shadow: var(--glow);
-  text-transform: none;
-  letter-spacing: normal;
-}
+.msg .mermaid foreignObject * { box-sizing: content-box; }
+.msg .katex { color: var(--fg); text-shadow: var(--glow); text-transform: none; letter-spacing: normal; }
 .msg .katex-display { margin: 0.6em 0; overflow-x: auto; overflow-y: hidden; }
 
+/* ── Composer ── */
 #composer {
-  display: flex; gap: 10px;
+  display: flex;
+  gap: 10px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
 }
 #input {
-  flex: 1; resize: none;
-  min-height: 34px; max-height: 240px;
+  flex: 1;
+  resize: none;
+  min-height: 34px;
+  max-height: 240px;
   height: 34px;
   overflow-y: hidden;
   background: transparent;
@@ -434,6 +402,7 @@ body.hide-reasoning .msg.reasoning { display: none; }
 }
 #input:focus { outline: none; border-color: var(--fg); }
 
+/* ── Completion popup ── */
 .completion-popup {
   position: fixed;
   z-index: 20;
@@ -452,31 +421,23 @@ body.hide-reasoning .msg.reasoning { display: none; }
   border-bottom: 1px dashed var(--border);
   padding: 4px 8px;
   font: inherit;
-  text-align: left;
   text-shadow: var(--glow);
+  text-align: left;
   white-space: pre;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 .completion-item:last-child { border-bottom: 0; }
 .completion-item.active,
-.completion-item:hover {
-  color: var(--hot);
-  background: #00000055;
-}
+.completion-item:hover { color: var(--hot); background: #00000055; }
 
+/* ── Streaming cursor ── */
 .msg.streaming .body::after {
   content: "\2588";
   color: var(--hot);
   margin-left: 2px;
   animation: blink 1s steps(1) infinite;
 }
-
 .thinking { color: var(--dim); font-style: normal; }
-.thinking::after {
-  content: "_";
-  animation: blink 1s steps(1) infinite;
-}
-@keyframes blink {
-  50% { opacity: 0; }
-}
+.thinking::after { content: "_"; animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { opacity: 0; } }

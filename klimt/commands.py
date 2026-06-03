@@ -27,6 +27,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
     CommandSpec("/cd", "/cd [path]", "Show or change the current working directory for this session."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),
+    CommandSpec("/theme", "/theme [name]", "Show or switch the UI CSS theme. Use Tab to complete names."),
     CommandSpec("/new", "/new", "Start a completely new empty session."),
     CommandSpec("/session", "/session [name]", "Resume a saved session. Use Tab to complete names."),
     CommandSpec("/sessions", "/sessions [resume|delete|clear] ...", "List, resume, delete, or clear saved sessions for this folder."),
