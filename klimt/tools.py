@@ -15,6 +15,7 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
+import threading
 from threading import Event
 from typing import Any, Dict
 
@@ -731,20 +732,32 @@ def _bash(command: str, cancel: Event | None = None, cwd: str | None = None) -> 
         start_new_session=True,
         cwd=str(workdir),
     )
+    # communicate() in a background thread so it drains stdout/stderr
+    # continuously. The polling loop above used p.poll() + late communicate(),
+    # which deadlocks when pipe buffers fill up before the process exits.
+    io_result: list[tuple[str, str] | None] = [None]
+
+    def _read() -> None:
+        io_result[0] = p.communicate()
+
+    t = threading.Thread(target=_read, daemon=True)
+    t.start()
     deadline = time.monotonic() + BASH_TIMEOUT
 
-    while p.poll() is None:
+    while t.is_alive():
         if cancel and cancel.is_set():
             _kill_process_tree(p)
-            stdout, stderr = p.communicate()
+            t.join()
+            stdout, stderr = io_result[0] or ("", "")
             return _format_result("interrupted", stdout, stderr)
         if time.monotonic() >= deadline:
             _kill_process_tree(p)
-            stdout, stderr = p.communicate()
+            t.join()
+            stdout, stderr = io_result[0] or ("", "")
             return _format_result("timeout", stdout, stderr)
         time.sleep(0.1)
 
-    stdout, stderr = p.communicate()
+    stdout, stderr = io_result[0] or ("", "")
     return _format_result(p.returncode, stdout, stderr)
 
 
