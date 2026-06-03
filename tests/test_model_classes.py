@@ -85,3 +85,75 @@ def test_resolve_unknown_class_raises(fake_models):
     ])
     with pytest.raises(KeyError):
         model_config.resolve_model_config("not-a-thing")
+
+
+def _write_models_doc(path: Path, doc: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(doc), encoding="utf-8")
+
+
+def test_default_falls_back_to_first(fake_models, monkeypatch):
+    monkeypatch.delenv("KLIMT_MODEL", raising=False)
+    _write_models(fake_models, [
+        {"name": "a", "provider": "azure", "api_key_env": "K"},
+        {"name": "b", "provider": "azure", "api_key_env": "K"},
+    ])
+    assert model_config.default_model_name() == "a"
+
+
+def test_default_field_by_name(fake_models, monkeypatch):
+    monkeypatch.delenv("KLIMT_MODEL", raising=False)
+    _write_models_doc(fake_models, {
+        "default": "b",
+        "models": [
+            {"name": "a", "provider": "azure", "api_key_env": "K"},
+            {"name": "b", "provider": "azure", "api_key_env": "K"},
+        ],
+    })
+    assert model_config.default_model_name() == "b"
+
+
+def test_default_field_by_class(fake_models, monkeypatch):
+    monkeypatch.delenv("KLIMT_MODEL", raising=False)
+    _write_models_doc(fake_models, {
+        "default": "sonnet",
+        "models": [
+            {"name": "opus-1", "provider": "azure", "api_key_env": "K", "classes": ["opus"]},
+            {"name": "sonnet-1", "provider": "azure", "api_key_env": "K", "classes": ["sonnet"]},
+        ],
+    })
+    assert model_config.default_model_name() == "sonnet-1"
+
+
+def test_default_field_unknown_falls_back(fake_models, monkeypatch):
+    monkeypatch.delenv("KLIMT_MODEL", raising=False)
+    _write_models_doc(fake_models, {
+        "default": "does-not-exist",
+        "models": [
+            {"name": "a", "provider": "azure", "api_key_env": "K"},
+            {"name": "b", "provider": "azure", "api_key_env": "K"},
+        ],
+    })
+    # Bad default shouldn't crash the app; fall through to the first listed model.
+    assert model_config.default_model_name() == "a"
+
+
+def test_env_overrides_default_field(fake_models, monkeypatch):
+    monkeypatch.setenv("KLIMT_MODEL", "b")
+    _write_models_doc(fake_models, {
+        "default": "a",
+        "models": [
+            {"name": "a", "provider": "azure", "api_key_env": "K"},
+            {"name": "b", "provider": "azure", "api_key_env": "K"},
+        ],
+    })
+    assert model_config.default_model_name() == "b"
+
+
+def test_env_unknown_still_raises(fake_models, monkeypatch):
+    monkeypatch.setenv("KLIMT_MODEL", "nope")
+    _write_models(fake_models, [
+        {"name": "a", "provider": "azure", "api_key_env": "K"},
+    ])
+    with pytest.raises(KeyError):
+        model_config.default_model_name()

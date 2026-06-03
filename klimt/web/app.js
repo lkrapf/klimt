@@ -4,6 +4,7 @@ import { installEventHandler } from "./events.js";
 import { finishWork, installInputHandlers, setInputHistory, submitCommand } from "./input.js";
 import { installNavGuard } from "./navguard.js";
 import { showTabStatus } from "./status.js";
+import { setTheme } from "./theme.js";
 import { activateTab, activeTab, initializeTabs, installTabs } from "./tabs.js";
 import { addStartup, useTranscript } from "./transcript.js";
 
@@ -34,6 +35,7 @@ async function initialize() {
   initialized = true;
   try {
     const info = await window.pywebview.api.info();
+    setTheme(info.theme);
     initializeTabs(info.tabs, info.active_tab);
     activateTab(info.active_tab);
     const tab = activeTab();

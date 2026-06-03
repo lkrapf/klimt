@@ -71,7 +71,7 @@ class ChatProvider:
             )
         return self.client.chat.completions.create(
             model=self.provider_model(),
-            messages=messages,
+            messages=_chat_completions_sanitize_messages(self.config.provider, messages),
             max_completion_tokens=max_completion_tokens,
         )
 
@@ -89,11 +89,9 @@ class ChatProvider:
                 tool_schemas,
                 max_completion_tokens,
             )
-        if self.config.provider == "ollama":
-            messages = _ollama_sanitize_messages(messages)
         return self.client.chat.completions.create(
             model=self.provider_model(),
-            messages=messages,
+            messages=_chat_completions_sanitize_messages(self.config.provider, messages),
             tools=tool_schemas,
             max_completion_tokens=max_completion_tokens,
             stream=True,
@@ -101,17 +99,26 @@ class ChatProvider:
         )
 
 
-def _ollama_sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Ollama rejects assistant messages where content is null.
+def _chat_completions_sanitize_messages(
+    provider: str,
+    messages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Normalize canonical history for OpenAI chat-completions APIs.
 
-    Strip the content key from assistant messages that have tool_calls but no
-    text content. The OpenAI SDK and other providers accept null content fine;
-    Ollama does not.
+    Klimt keeps provider-neutral history. Some OpenAI-compatible endpoints reject
+    assistant messages with JSON null content, especially tool-call turns. Avoid
+    persisting provider-specific rewrites; adapt the outbound payload instead.
     """
     out = []
     for msg in messages:
-        if msg.get("role") == "assistant" and msg.get("content") is None:
-            msg = {k: v for k, v in msg.items() if k != "content"}
+        if msg.get("role") != "assistant" or msg.get("content") is not None:
+            out.append(msg)
+            continue
+        msg = dict(msg)
+        if provider == "ollama" and msg.get("tool_calls"):
+            msg.pop("content", None)
+        else:
+            msg["content"] = ""
         out.append(msg)
     return out
 
@@ -202,12 +209,13 @@ def _anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
         elif role == "assistant":
             blocks: list[dict[str, Any]] = []
             reasoning = msg.get("reasoning")
-            if reasoning:
-                thinking_block = {"type": "thinking", "thinking": str(reasoning)}
-                signature = msg.get("reasoning_signature")
-                if signature:
-                    thinking_block["signature"] = str(signature)
-                blocks.append(thinking_block)
+            signature = msg.get("reasoning_signature")
+            if reasoning and signature:
+                blocks.append({
+                    "type": "thinking",
+                    "thinking": str(reasoning),
+                    "signature": str(signature),
+                })
             content = msg.get("content")
             if content:
                 blocks.append({"type": "text", "text": str(content)})

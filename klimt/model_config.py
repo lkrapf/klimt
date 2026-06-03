@@ -110,12 +110,18 @@ def _parse_classes(value: Any) -> tuple[str, ...]:
     return tuple(out)
 
 
-def list_model_configs() -> list[ModelConfig]:
+def _load_models_doc() -> Any:
     try:
-        data = json.loads(MODELS_PATH.read_text(encoding="utf-8"))
+        return json.loads(MODELS_PATH.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        data = []
+        return []
     except json.JSONDecodeError:
+        return None
+
+
+def list_model_configs() -> list[ModelConfig]:
+    data = _load_models_doc()
+    if data is None:
         return []
 
     raw_items = data.get("models", []) if isinstance(data, dict) else data
@@ -130,6 +136,14 @@ def list_model_configs() -> list[ModelConfig]:
             seen.add(cfg.name)
             out.append(cfg)
     return out
+
+
+def _configured_default() -> str:
+    """Top-level `default` field in models.json, if any."""
+    data = _load_models_doc()
+    if not isinstance(data, dict):
+        return ""
+    return str(data.get("default") or "").strip()
 
 
 def list_model_names() -> list[str]:
@@ -154,14 +168,31 @@ def default_model_name() -> str:
     if not configured:
         raise RuntimeError(f"no models configured; create {MODELS_PATH}")
 
-    preferred = os.environ.get("KLIMT_MODEL", "").strip()
-    if not preferred:
-        return configured[0].name
+    env = os.environ.get("KLIMT_MODEL", "").strip()
+    if env:
+        resolved = _match_name(env, configured)
+        if resolved:
+            return resolved
+        raise KeyError(f"KLIMT_MODEL={env!r} is not configured in {MODELS_PATH}")
 
-    for cfg in configured:
-        if preferred in {cfg.name, cfg.model}:
+    configured_default = _configured_default()
+    if configured_default:
+        resolved = _match_name(configured_default, configured)
+        if resolved:
+            return resolved
+        # Bad config: fall through to the first entry rather than crash the app.
+
+    return configured[0].name
+
+
+def _match_name(requested: str, configs: list[ModelConfig]) -> str:
+    for cfg in configs:
+        if requested in {cfg.name, cfg.model}:
             return cfg.name
-    raise KeyError(f"KLIMT_MODEL={preferred!r} is not configured in {MODELS_PATH}")
+    for cfg in configs:
+        if requested in cfg.classes:
+            return cfg.name
+    return ""
 
 
 def resolve_model_config(name: str) -> ModelConfig:

@@ -88,12 +88,3 @@ export function showTabStatus(tab) {
   setQueueCount(tab?.queue?.length || 0);
 }
 
-export function reloadCss() {
-  const href = new URL("style.css", window.location.href).href;
-  const bust = `v=${Date.now()}`;
-  document.querySelectorAll('link[rel="stylesheet"]').forEach((link) => {
-    if (new URL(link.href, window.location.href).pathname.endsWith("/style.css")) {
-      link.href = `${href}?${bust}`;
-    }
-  });
-}

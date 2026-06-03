@@ -16,7 +16,7 @@ from typing import Any
 
 import webview
 
-from . import __version__, agents, commands, completion, prompt, skills, tools
+from . import __version__, agents, commands, completion, prompt, skills, themes, tools
 from .api import ChatSession
 from .model_config import default_model_name, list_model_configs, list_model_names
 
@@ -34,10 +34,18 @@ def _build_system_prompt(cwd: str | None = None) -> str:
     )
 
 
-def _new_session(cwd: str | None = None) -> ChatSession:
+def _new_session(cwd: str | None = None, model: str | None = None) -> ChatSession:
     cwd = str(Path(cwd or os.getcwd()).expanduser().resolve())
+    chosen = (model or "").strip() or default_model_name()
+    # If the caller passes a model that no longer resolves (e.g. removed from
+    # models.json between sessions), fall back rather than crash.
+    try:
+        from .model_config import resolve_model_config
+        resolve_model_config(chosen)
+    except KeyError:
+        chosen = default_model_name()
     return ChatSession(
-        model=default_model_name(),
+        model=chosen,
         system=_build_system_prompt(cwd),
         cwd=cwd,
     )
@@ -46,10 +54,12 @@ def _new_session(cwd: str | None = None) -> ChatSession:
 class _SingleTabApi:
     """One independent chat tab. Exposed through the multi-tab Api below."""
 
-    def __init__(self, session: ChatSession, tab_id: str, emit) -> None:
+    def __init__(self, session: ChatSession, tab_id: str, emit, get_theme=None, set_theme=None) -> None:
         self._session = session
         self._tab_id = tab_id
         self._emit_to_window = emit
+        self._get_theme = get_theme or themes.default_theme
+        self._set_theme = set_theme or (lambda name: None)
         self._session_choices: list[dict[str, Any]] = []
         self._busy = False
         self._busy_lock = threading.Lock()
@@ -192,6 +202,9 @@ class _SingleTabApi:
         if command == "/reload":
             self._reload()
             return True
+        if command == "/theme" or command.startswith("/theme "):
+            self._theme(command[6:].strip())
+            return True
         if command == "/quit":
             self._quit()
             return True
@@ -304,6 +317,8 @@ class _SingleTabApi:
                 {"usage": usage, "description": description}
                 for usage, description in commands.command_rows()
             ],
+            "theme": self._get_theme(),
+            "themes": themes.list_theme_names(),
             # Prefer the explicit name. Keep `tools` for compatibility with old JS.
             "available_tools": available_tools,
             "tools": available_tools,
@@ -402,7 +417,6 @@ class _SingleTabApi:
         self._emit({"type": "text", "content": result})
 
     @staticmethod
-    @staticmethod
     def _table_cell(text: object) -> str:
         """Minimal escaping for a plain (non-code-span) Markdown table cell."""
         return str(text or "").replace("|", "\\|")
@@ -473,8 +487,9 @@ class _SingleTabApi:
         return name
 
     def _new(self) -> None:
+        prior_model = self._session.model
         self._session.interrupt()
-        self._session = _new_session(self._session.cwd)
+        self._session = _new_session(self._session.cwd, model=prior_model)
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
@@ -516,10 +531,11 @@ class _SingleTabApi:
         self._list_sessions()
 
     def _clear_sessions(self) -> None:
+        prior_model = self._session.model
         self._session.interrupt()
         old_cwd = self._session.cwd
         self._session.store.clear()
-        self._session = _new_session(old_cwd)
+        self._session = _new_session(old_cwd, model=prior_model)
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
@@ -557,6 +573,41 @@ class _SingleTabApi:
             self._emit({"type": "text", "content": f"session **{self._md_escape(self._session.session_name)}** — {state}\n\n_usage: `/save <name>` to rename_"})
             return
         self._emit({"type": "text", "content": f"saved session **{self._md_escape(self._session.session_name)}**"})
+
+    def _theme(self, theme: str) -> None:
+        choices = themes.list_theme_names()
+        current = self._get_theme()
+        if not theme:
+            if not choices:
+                self._emit({"type": "text", "content": "_no themes found under `klimt/web/themes`_"})
+                return
+            rows = [
+                "## Themes",
+                "",
+                "| name | current |",
+                "|---|---|",
+            ]
+            for name in choices:
+                rows.append(f"| `{self._table_cell(name)}` | {'yes' if name == current else ''} |")
+            rows.extend(["", "_usage: `/theme <name>`; use Tab to complete names._"])
+            self._emit({"type": "text", "content": "\n".join(rows)})
+            return
+
+        requested = theme.strip()
+        if requested not in choices:
+            self._emit({
+                "type": "text",
+                "content": (
+                    f"_unknown theme: `{self._md_escape(requested)}`_\n\n"
+                    "Available choices: "
+                    + (", ".join(f"`{self._md_escape(x)}`" for x in choices) if choices else "_none_")
+                ),
+            })
+            return
+
+        self._set_theme(requested)
+        self._emit({"type": "theme", "name": requested})
+        self._emit({"type": "text", "content": f"theme set to **{self._md_escape(requested)}**"})
 
     def _model(self, model: str) -> None:
         configs = list_model_configs()
@@ -606,6 +657,7 @@ class _SingleTabApi:
         importlib.reload(tools)
         self._session.system = _build_system_prompt(self._session.cwd)
         self._session.reload_client()
+        self._emit({"type": "theme", "name": self._get_theme()})
         self._emit({"type": "reload_css"})
         self._sync_input_history()
         self._emit({"type": "text", "content": "reloaded config, skills, tools, model endpoint, and CSS"})
@@ -623,7 +675,8 @@ class Api:
         self._tabs_lock = threading.Lock()
         self._tabs: dict[str, _SingleTabApi] = {}
         self._first_tab_id = "tab-1"
-        self._tabs[self._first_tab_id] = _SingleTabApi(session, self._first_tab_id, self._emit)
+        self._theme = themes.load_theme()
+        self._tabs[self._first_tab_id] = _SingleTabApi(session, self._first_tab_id, self._emit, self._get_theme, self._set_theme)
 
     def attach_window(self, window) -> None:
         self._window = window
@@ -639,6 +692,13 @@ class Api:
             if tab_id and tab_id in self._tabs:
                 return self._tabs[tab_id]
             return self._tabs[self._first_tab_id]
+
+    def _get_theme(self) -> str:
+        return self._theme
+
+    def _set_theme(self, name: str) -> None:
+        themes.save_theme(name)
+        self._theme = name
 
     def info(self) -> dict:
         available_tools = [
@@ -666,6 +726,8 @@ class Api:
             ],
             "available_tools": available_tools,
             "tools": available_tools,
+            "theme": self._get_theme(),
+            "themes": themes.list_theme_names(),
             "tabs": tab_states,
             "active_tab": self._first_tab_id,
         }
@@ -679,10 +741,11 @@ class Api:
     def complete(self, text: str, cursor: int | None = None, tab_id: str | None = None) -> dict:
         return self._tab(tab_id).complete(text, cursor)
 
-    def new_tab(self) -> dict:
+    def new_tab(self, model: str | None = None) -> dict:
         with self._tabs_lock:
             tab_id = "tab-" + uuid.uuid4().hex[:8]
-            self._tabs[tab_id] = _SingleTabApi(_new_session(), tab_id, self._emit)
+            session = _new_session(model=model)
+            self._tabs[tab_id] = _SingleTabApi(session, tab_id, self._emit, self._get_theme, self._set_theme)
             return {"ok": True, "tab": self._tabs[tab_id].state()}
 
     def close_tab(self, tab_id: str) -> dict:
@@ -756,7 +819,7 @@ def main() -> None:
 
     window = webview.create_window(
         title="Klimt",
-        url=str(WEB_DIR / "index.html"),
+        url=f"{WEB_DIR / 'index.html'}?theme={themes.load_theme()}",
         js_api=api,
         width=900,
         height=720,

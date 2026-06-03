@@ -51,8 +51,9 @@ python3 -m klimt
 
 Optional env:
 
-- `KLIMT_MODEL` — default model selector for new sessions; must name an entry in
-  `~/.klimt/models.json`.
+- `KLIMT_MODEL` — default model selector for new sessions; overrides the
+  `default` field in `~/.klimt/models.json`. Must resolve to a configured
+  entry (by name, provider model string, or declared class).
 - `KLIMT_DEBUG=1` — enables webview devtools.
 
 The top-bar usage indicator uses the active model's `context_window` from
@@ -63,6 +64,18 @@ percentage.
 
 Model endpoints are objects in `~/.klimt/models.json`. `name` is what you type
 after `/model`. `model` or `deployment` is what Klimt sends to the provider.
+
+Optionally set a top-level `default` field to pick which entry new sessions
+start on. It resolves like any other model reference -- by exact `name`,
+provider model, or declared class. `KLIMT_MODEL` overrides it. With neither
+set, the first listed model wins.
+
+```json
+{
+  "default": "sonnet",
+  "models": [ ... ]
+}
+```
 
 ```json
 {
