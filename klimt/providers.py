@@ -89,6 +89,8 @@ class ChatProvider:
                 tool_schemas,
                 max_completion_tokens,
             )
+        if self.config.provider == "ollama":
+            messages = _ollama_sanitize_messages(messages)
         return self.client.chat.completions.create(
             model=self.provider_model(),
             messages=messages,
@@ -97,6 +99,21 @@ class ChatProvider:
             stream=True,
             stream_options={"include_usage": True},
         )
+
+
+def _ollama_sanitize_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Ollama rejects assistant messages where content is null.
+
+    Strip the content key from assistant messages that have tool_calls but no
+    text content. The OpenAI SDK and other providers accept null content fine;
+    Ollama does not.
+    """
+    out = []
+    for msg in messages:
+        if msg.get("role") == "assistant" and msg.get("content") is None:
+            msg = {k: v for k, v in msg.items() if k != "content"}
+        out.append(msg)
+    return out
 
 
 def _debug_provider_event(provider: str, event: dict[str, Any]) -> None:
