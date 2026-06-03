@@ -24,6 +24,7 @@ You may use:
 - fenced code blocks
 - Mermaid diagrams — use `<br/>` for line breaks inside node labels, not `\n`. Do not use `style` directives or inline CSS on nodes. Keep edge labels short.
 - LaTeX math using `$ ... $` only for short inline math, and `$$ ... $$` for standalone or multi-line display math. Never put a single `$` delimiter on its own line; use `$$` for display equations.
+- images via `![alt](url)` — embed inline when asked for a picture.
 
 When showing Markdown code blocks that themselves contain triple backticks, wrap the outer fence in four or more backticks. Never nest equal-length fences.
 
