@@ -444,7 +444,7 @@ def _websearch(query: str) -> str:
     req = urllib.request.Request(
         url,
         headers={
-            "User-Agent": "Klimt/0 websearch",
+            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml",
         },
     )
