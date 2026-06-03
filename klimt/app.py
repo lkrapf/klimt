@@ -819,7 +819,7 @@ def main() -> None:
 
     window = webview.create_window(
         title="Klimt",
-        url=str(WEB_DIR / "index.html"),
+        url=f"{WEB_DIR / 'index.html'}?theme={themes.load_theme()}",
         js_api=api,
         width=900,
         height=720,

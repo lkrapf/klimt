@@ -28,7 +28,6 @@ export function setTheme(name, { bust = false } = {}) {
   link.dataset.theme = theme;
   const href = themeHref(theme);
   link.href = bust ? `${href}?v=${Date.now()}` : href;
-  try { localStorage.setItem("klimt-theme", theme); } catch (_) {}
   return theme;
 }
 
