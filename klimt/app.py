@@ -34,10 +34,18 @@ def _build_system_prompt(cwd: str | None = None) -> str:
     )
 
 
-def _new_session(cwd: str | None = None) -> ChatSession:
+def _new_session(cwd: str | None = None, model: str | None = None) -> ChatSession:
     cwd = str(Path(cwd or os.getcwd()).expanduser().resolve())
+    chosen = (model or "").strip() or default_model_name()
+    # If the caller passes a model that no longer resolves (e.g. removed from
+    # models.json between sessions), fall back rather than crash.
+    try:
+        from .model_config import resolve_model_config
+        resolve_model_config(chosen)
+    except KeyError:
+        chosen = default_model_name()
     return ChatSession(
-        model=default_model_name(),
+        model=chosen,
         system=_build_system_prompt(cwd),
         cwd=cwd,
     )
@@ -479,8 +487,9 @@ class _SingleTabApi:
         return name
 
     def _new(self) -> None:
+        prior_model = self._session.model
         self._session.interrupt()
-        self._session = _new_session(self._session.cwd)
+        self._session = _new_session(self._session.cwd, model=prior_model)
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
@@ -522,10 +531,11 @@ class _SingleTabApi:
         self._list_sessions()
 
     def _clear_sessions(self) -> None:
+        prior_model = self._session.model
         self._session.interrupt()
         old_cwd = self._session.cwd
         self._session.store.clear()
-        self._session = _new_session(old_cwd)
+        self._session = _new_session(old_cwd, model=prior_model)
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
@@ -731,10 +741,11 @@ class Api:
     def complete(self, text: str, cursor: int | None = None, tab_id: str | None = None) -> dict:
         return self._tab(tab_id).complete(text, cursor)
 
-    def new_tab(self) -> dict:
+    def new_tab(self, model: str | None = None) -> dict:
         with self._tabs_lock:
             tab_id = "tab-" + uuid.uuid4().hex[:8]
-            self._tabs[tab_id] = _SingleTabApi(_new_session(), tab_id, self._emit, self._get_theme, self._set_theme)
+            session = _new_session(model=model)
+            self._tabs[tab_id] = _SingleTabApi(session, tab_id, self._emit, self._get_theme, self._set_theme)
             return {"ok": True, "tab": self._tabs[tab_id].state()}
 
     def close_tab(self, tab_id: str) -> dict:

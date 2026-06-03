@@ -158,7 +158,8 @@ async function send(klimt) {
 }
 
 async function createNewTab() {
-  const res = await window.pywebview.api.new_tab();
+  const current = activeTab();
+  const res = await window.pywebview.api.new_tab(current?.model || "");
   if (res.ok) addTab(res.tab);
 }
 
