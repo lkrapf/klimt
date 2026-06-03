@@ -331,64 +331,94 @@ class _HTMLTextParser(html.parser.HTMLParser):
             self.parts.append("\n")
 
 
-class _DuckDuckGoHTMLParser(html.parser.HTMLParser):
+class _StartpageHTMLParser(html.parser.HTMLParser):
+    """Parse search results from Startpage HTML.
+
+    Each result is wrapped in `<div class="result ...">` and contains many
+    nested `<div>`s, so we track div depth to find the matching closing tag.
+    """
+
+    _skip_tags = {"script", "style", "noscript", "template", "svg"}
+
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
         self.results: list[dict[str, str]] = []
         self._current: dict[str, str] | None = None
-        self._field: str | None = None
-        self._depth = 0
+        self._depth = 0  # div depth inside the current result
+        self._in_title_link = False
+        self._in_description = False
+        self._skip_depth = 0
+
+    @staticmethod
+    def _has_class(cls: str, name: str) -> bool:
+        return name in cls.split()
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._skip_tags:
+            self._skip_depth += 1
+            return
+        if self._skip_depth:
+            return
+
         attrs_dict = dict(attrs)
         cls = attrs_dict.get("class") or ""
-        classes = set(cls.split())
 
-        if tag == "div" and "result" in classes and self._current is None:
+        # Start of a result block: <div class="result ...">
+        if (
+            tag == "div"
+            and self._current is None
+            and self._has_class(cls, "result")
+        ):
             self._current = {"title": "", "url": "", "snippet": ""}
             self._depth = 1
             return
 
-        if self._current is not None:
-            if tag == "div":
-                self._depth += 1
-            if tag == "a" and "result__a" in classes:
-                self._current["url"] = _unwrap_ddg_url(attrs_dict.get("href") or "")
-                self._field = "title"
-            elif "result__snippet" in classes:
-                self._field = "snippet"
-
-    def handle_data(self, data: str) -> None:
-        if self._current is not None and self._field:
-            self._current[self._field] += data
-
-    def handle_endtag(self, tag: str) -> None:
         if self._current is None:
             return
-        if tag == "a" and self._field == "title":
-            self._field = None
-        elif tag in {"a", "div"} and self._field == "snippet":
-            self._field = None
+
         if tag == "div":
+            self._depth += 1
+            return
+
+        # Title link: <a class="result-title result-link ..." href="...">
+        if (
+            tag == "a"
+            and self._has_class(cls, "result-title")
+            and self._has_class(cls, "result-link")
+        ):
+            self._current["url"] = attrs_dict.get("href") or ""
+            self._in_title_link = True
+        # Description/snippet: <p class="description ...">
+        elif tag == "p" and self._has_class(cls, "description"):
+            self._in_description = True
+
+    def handle_data(self, data: str) -> None:
+        if self._skip_depth or self._current is None:
+            return
+        if self._in_title_link:
+            self._current["title"] += data
+        elif self._in_description:
+            self._current["snippet"] += data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._skip_tags:
+            if self._skip_depth:
+                self._skip_depth -= 1
+            return
+        if self._skip_depth or self._current is None:
+            return
+        if tag == "a" and self._in_title_link:
+            self._in_title_link = False
+        elif tag == "p" and self._in_description:
+            self._in_description = False
+        elif tag == "div":
             self._depth -= 1
             if self._depth <= 0:
                 if self._current.get("title") and self._current.get("url"):
                     self.results.append(self._current)
                 self._current = None
-                self._field = None
-
-
-
-def _unwrap_ddg_url(href: str) -> str:
-    if href.startswith("//"):
-        href = "https:" + href
-    if href.startswith("/"):
-        href = "https://html.duckduckgo.com" + href
-    parsed = urllib.parse.urlparse(href)
-    qs = urllib.parse.parse_qs(parsed.query)
-    if "uddg" in qs and qs["uddg"]:
-        return qs["uddg"][0]
-    return href
+                self._in_title_link = False
+                self._in_description = False
 
 
 def _clean_text(s: str) -> str:
@@ -440,7 +470,7 @@ def _websearch(query: str) -> str:
     if not query:
         return "error: empty query"
 
-    url = "https://html.duckduckgo.com/html/?" + urllib.parse.urlencode({"q": query})
+    url = "https://www.startpage.com/sp/search?" + urllib.parse.urlencode({"query": query})
     req = urllib.request.Request(
         url,
         headers={
@@ -452,7 +482,7 @@ def _websearch(query: str) -> str:
         raw = r.read(WEBFETCH_MAX_BYTES)
         charset = r.headers.get_content_charset() or "utf-8"
 
-    parser = _DuckDuckGoHTMLParser()
+    parser = _StartpageHTMLParser()
     parser.feed(raw.decode(charset, errors="replace"))
     results = [
         {

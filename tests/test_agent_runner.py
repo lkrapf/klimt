@@ -104,10 +104,10 @@ def test_filtered_tool_schemas_subset():
 
 
 def test_subagent_prompt_includes_role_and_tools(tmp_path):
-    agent = agents_mod.builtin_general()
+    agent = agents_mod.builtin_read_only()
     text = agent_runner.build_subagent_system_prompt(agent, str(tmp_path))
     assert "Subagent role" in text
-    assert "`general`" in text
+    assert "`read-only`" in text
     assert "Runtime tool manifest" in text
     # Only read-mode tools surfaced.
     assert "`read`" in text
@@ -121,7 +121,7 @@ def test_subagent_prompt_excludes_global_profile(tmp_path, monkeypatch):
         tmp_path / "should-not-be-read.md",
     )
     (tmp_path / "should-not-be-read.md").write_text("SECRET-USER-PROFILE")
-    agent = agents_mod.builtin_general()
+    agent = agents_mod.builtin_read_only()
     text = agent_runner.build_subagent_system_prompt(agent, str(tmp_path))
     assert "SECRET-USER-PROFILE" not in text
 
@@ -152,12 +152,12 @@ def _patch_provider_and_config(monkeypatch, provider: _FakeProvider):
 def test_run_agent_single_turn_text(tmp_path, monkeypatch):
     provider = _FakeProvider(scripts=[[_text_chunk("found nothing of note", finish="stop")]])
     _patch_provider_and_config(monkeypatch, provider)
-    inv = _make_inv(tmp_path, agents_mod.builtin_general())
+    inv = _make_inv(tmp_path, agents_mod.builtin_read_only())
 
     out = agent_runner.run_agent(inv)
     assert "status: ok" in out
     assert "found nothing of note" in out
-    assert "agent: general" in out
+    assert "agent: read-only" in out
     assert "mode: read" in out
     # Sidecar transcript written.
     transcripts = list((tmp_path / ".transcripts").glob("*.md"))
@@ -179,7 +179,7 @@ def test_run_agent_uses_tool_then_finishes(tmp_path, monkeypatch):
 
     monkeypatch.setattr(agent_runner.tools_mod, "run", fake_tool_run)
 
-    inv = _make_inv(tmp_path, agents_mod.builtin_general())
+    inv = _make_inv(tmp_path, agents_mod.builtin_read_only())
     out = agent_runner.run_agent(inv)
     assert "status: ok" in out
     assert "done" in out
@@ -309,7 +309,7 @@ def test_run_agent_uses_override_model(tmp_path, monkeypatch):
         agent_runner, "resolve_model_config",
         lambda n: _FakeResolvedConfig(name="resolved-from-class" if n == "opus" else n),
     )
-    inv = _make_inv(tmp_path, agents_mod.builtin_general())
+    inv = _make_inv(tmp_path, agents_mod.builtin_read_only())
     inv.model_override = "opus"
     out = agent_runner.run_agent(inv)
     assert "model: resolved-from-class" in out
@@ -317,7 +317,7 @@ def test_run_agent_uses_override_model(tmp_path, monkeypatch):
 
 def test_run_agent_cancelled_before_start(tmp_path, monkeypatch):
     _patch_provider_and_config(monkeypatch, _FakeProvider(scripts=[]))
-    inv = _make_inv(tmp_path, agents_mod.builtin_general())
+    inv = _make_inv(tmp_path, agents_mod.builtin_read_only())
     inv.cancel.set()
     out = agent_runner.run_agent(inv)
     assert "status: interrupted" in out

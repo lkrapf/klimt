@@ -50,11 +50,12 @@ roadmap theater.
 ### Subagent first-cut spec
 
 - Model-callable tool name: `agent`.
-- Default/fallback agent: `general`.
-- Built-ins: only `general`; no built-in reviewer/planner/security/tester cast.
+- Default/fallback agent: `read-only`.
+- Built-ins: `read-only` (read-mode research) and `read-write` (full local
+  tool access). No built-in reviewer/planner/security/tester cast.
 - Agent definitions:
   - Load `.klimt/agents/**/*.md` and `~/.klimt/agents/**/*.md` only.
-  - Project agents override user agents; built-in `general` is lowest priority.
+  - Project agents override user agents; built-in `read-only` / `read-write` are lowest priority.
   - Use Markdown files with frontmatter.
   - Support `name`, `description`, `tools`, `model`, `maxTurns` / `max_turns`, and `skills`.
   - `tools` is an allowlist. Ignore `disallowedTools` for now.

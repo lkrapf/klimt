@@ -159,28 +159,29 @@ def test_discover_project_overrides_user(tmp_path: Path, monkeypatch):
     names = {a.name: a for a in found}
     assert names["reviewer"].source == "project"
     assert names["reviewer"].description == "project version"
-    assert "general" in names  # built-in always present
+    assert "read-only" in names  # built-in always present
+    assert "read-write" in names  # built-in always present
 
 
 def test_discover_user_overrides_builtin(tmp_path: Path, monkeypatch):
     user_dir = tmp_path / "user_agents"
     _write_agent(
         user_dir,
-        "general",
-        "---\nname: general\ndescription: custom\ntools: full\n---\ncustom body\n",
+        "read-only",
+        "---\nname: read-only\ndescription: custom\ntools: full\n---\ncustom body\n",
     )
     monkeypatch.setattr(agents, "USER_AGENTS_DIR", user_dir)
     found, _ = agents.discover_agents(cwd=tmp_path)
     by_name = {a.name: a for a in found}
-    assert by_name["general"].source == "user"
-    assert by_name["general"].mode == "full"
+    assert by_name["read-only"].source == "user"
+    assert by_name["read-only"].mode == "full"
 
 
-def test_builtin_general_present_when_no_files(tmp_path: Path, monkeypatch):
+def test_builtins_present_when_no_files(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(agents, "USER_AGENTS_DIR", tmp_path / "missing")
     found, warnings = agents.discover_agents(cwd=tmp_path / "no-project")
     names = [a.name for a in found]
-    assert names == ["general"]
+    assert names == ["read-only", "read-write"]
 
 
 # ---------------------------------------------------------------------------
@@ -193,9 +194,16 @@ def test_catalog_manifest_empty():
 
 
 def test_catalog_manifest_shape():
-    agent = agents.builtin_general()
+    agent = agents.builtin_read_only()
     out = agents.build_catalog_manifest([agent])
     assert "<available_agents>" in out
-    assert "<name>general</name>" in out
+    assert "<name>read-only</name>" in out
     assert "<mode>read</mode>" in out
     assert "read, glob, grep, webfetch, websearch" in out
+
+
+def test_catalog_manifest_read_write():
+    agent = agents.builtin_read_write()
+    out = agents.build_catalog_manifest([agent])
+    assert "<name>read-write</name>" in out
+    assert "<mode>full</mode>" in out

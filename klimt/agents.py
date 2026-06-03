@@ -5,7 +5,9 @@ Agents are defined as Markdown files with YAML-ish frontmatter under one of:
 - `~/.klimt/agents/**/*.md`  (user-wide)
 - `<project>/.klimt/agents/**/*.md`  (project-local; overrides user)
 
-Plus the built-in `general` agent, which is the lowest-priority fallback.
+Plus the built-in `read-only` and `read-write` agents, which are the
+lowest-priority fallbacks. `read-only` is the default when no agent name is
+specified by the caller.
 
 Frontmatter keys: `name`, `description`, `tools`, `model`, `maxTurns` /
 `max_turns`, `skills`. See PLAN.md "Subagent first-cut spec" for semantics.
@@ -195,24 +197,58 @@ def _coerce_str_list(value: object) -> tuple[str, ...]:
 # ---------------------------------------------------------------------------
 
 
-def builtin_general() -> Agent:
+def builtin_read_only() -> Agent:
     return Agent(
-        name="general",
+        name="read-only",
         description=(
-            "General-purpose read-only research agent. Reads files, searches "
-            "code and the web, and reports back. Cannot edit, write, or run "
-            "shell commands."
+            "General-purpose read-only subagent. Reads files, searches code "
+            "and the web, and reports back. Cannot edit, write, or run shell "
+            "commands. Safe to fan out in parallel."
         ),
         tools=READ_TOOLS,
         body=(
-            "You are a focused research subagent. Your job is to investigate the "
-            "task delegated by the parent assistant and return a concise, "
+            "You are a focused read-only subagent. Your job is to investigate "
+            "the task delegated by the parent assistant and return a concise, "
             "structured Markdown report.\n\n"
             "- Stick to the task. Do not invent scope.\n"
             "- Cite specific files, line numbers, URLs, and commands you used.\n"
             "- Distinguish observed facts from assumptions.\n"
             "- If you cannot finish within the turn budget, return what you "
             "have and clearly state what is unfinished.\n"
+        ),
+        source="builtin",
+    )
+
+
+def builtin_read_write() -> Agent:
+    return Agent(
+        name="read-write",
+        description=(
+            "General-purpose read-write subagent with full local tool access "
+            "(read, write, edit, bash, glob, grep, webfetch, websearch). Use "
+            "to delegate scoped work that mutates the working tree or runs "
+            "commands. Should generally be invoked serially; if the parent "
+            "runs multiple instances in parallel, it must give each disjoint "
+            "scope."
+        ),
+        tools=FULL_TOOLS,
+        body=(
+            "You are a focused read-write subagent. Your job is to carry out "
+            "the task delegated by the parent assistant, which may include "
+            "editing files, writing new files, and running shell commands.\n\n"
+            "- Stick to the task and the scope the parent gave you. Do not "
+            "  touch unrelated files or wander outside the working tree.\n"
+            "- Prefer the smallest change that satisfies the task. Do not "
+            "  refactor opportunistically.\n"
+            "- Assume you may be running alongside other subagents. If the "
+            "  parent has not guaranteed disjoint scopes, avoid edits that "
+            "  could race with concurrent work.\n"
+            "- In your final report, list every file you mutated and every "
+            "  shell command you ran, each with a one-line rationale.\n"
+            "- Cite specific files, line numbers, URLs, and commands.\n"
+            "- If you cannot finish within the turn budget, return what you "
+            "  have, describe the partial state on disk, and clearly state "
+            "  what is unfinished.\n"
         ),
         source="builtin",
     )
@@ -296,7 +332,7 @@ def discover_agents(cwd: Path | str | None = None) -> tuple[list[Agent], list[st
     warnings.extend(w)
 
     # Order: lowest priority first; later entries overwrite earlier ones.
-    for agent in (builtin_general(),):
+    for agent in (builtin_read_only(), builtin_read_write()):
         by_name[agent.name] = agent
     for agent in user_agents:
         by_name[agent.name] = agent

@@ -356,7 +356,7 @@ class ChatSession:
         if name in READ_ONLY_TOOLS:
             return True
         if name == "agent":
-            target = (args.get("name") or "").strip() or "general"
+            target = (args.get("name") or "").strip() or "read-only"
             agent = agents_mod.find_agent(target, self.cwd)
             return bool(agent and agent.mode != "full")
         return False
@@ -364,7 +364,7 @@ class ChatSession:
     def _agent_dispatch(self, name: str, args: Dict[str, Any]) -> str:
         if name != "agent":
             return f"error: unknown agent dispatch {name!r}"
-        target = (args.get("name") or "").strip() or "general"
+        target = (args.get("name") or "").strip() or "read-only"
         task = (args.get("prompt") or args.get("task") or "").strip()
         if not task:
             return "error: agent invocation requires a non-empty `prompt`"
