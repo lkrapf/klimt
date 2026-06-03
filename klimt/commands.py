@@ -110,6 +110,10 @@ def hotkeys_markdown() -> str:
 def run_shell(session: Any, command: str) -> list[dict[str, Any]]:
     if not command:
         return []
+    # A bang command is a fresh user action. Clear any stale cancel state left
+    # by a prior interrupt; otherwise _bash sees a set event and aborts before
+    # it starts, returning exit=interrupted with no output.
+    session._cancel.clear()
     result = tools.run("bash", {"command": command}, session._cancel, session.cwd)
     if not session._cancel.is_set():
         session.history.append({"role": "user", "content": f"$ {command}\n{result}"})
