@@ -135,7 +135,7 @@ export async function submitCommand(klimt, text, { echo = true, tab = activeTab(
   updateActiveStatus(tab);
   useTranscript(tab.id);
   if (echo) addMessage("user", text, { markdown: false });
-  tab.pending = addPending();
+  tab.pending = addPending(text.startsWith("!") ? "running" : "thinking");
 
   try {
     const res = await window.pywebview.api.send(text, tab.id);

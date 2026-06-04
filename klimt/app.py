@@ -127,6 +127,18 @@ class _SingleTabApi:
                 if spec.busy == "block" and self._is_busy():
                     self._emit({"type": "error", "message": "session is still busy; press Esc to interrupt"})
                     return {"ok": False, "error": "session busy"}
+                if command.startswith("!"):
+                    # Shell commands can block arbitrarily long; run off the bridge thread
+                    # so the UI doesn't freeze on the "working..." spinner while waiting.
+                    # sync=True tells JS to skip the thinking indicator — output arrives
+                    # as a tool event, not as an LLM stream.
+                    background = True
+                    threading.Thread(
+                        target=self._shell_worker,
+                        args=(command,),
+                        daemon=True,
+                    ).start()
+                    return {"ok": True}
                 handled = self._handle_command(command, spec)
                 if handled:
                     return {"ok": True}
@@ -167,11 +179,6 @@ class _SingleTabApi:
             return self._busy
 
     def _handle_command(self, command: str, spec: commands.CommandSpec) -> bool:
-        if command.startswith("!"):
-            for e in commands.run_shell(self._session, command[1:].strip()):
-                self._emit(e)
-            self._session.persist()
-            return True
         if command == "/new":
             self._new()
             return True
@@ -220,6 +227,18 @@ class _SingleTabApi:
             self._session.persist()
             return True
         return False
+
+    def _shell_worker(self, command: str) -> None:
+        try:
+            for e in commands.run_shell(self._session, command[1:].strip()):
+                self._emit(e)
+            self._session.persist()
+        except Exception as e:  # noqa: BLE001
+            with contextlib.suppress(Exception):
+                self._emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
+        finally:
+            with contextlib.suppress(Exception):
+                self._done()
 
     def _stream_worker(self, session: ChatSession, text: str, generation: int) -> None:
         emit = lambda event: self._emit_current(generation, event)
