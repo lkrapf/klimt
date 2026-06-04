@@ -276,7 +276,7 @@ shown separately when the provider streams them.
 | `write` | Write a full file, creating parent directories. |
 | `bash` | Run a shell command with a 120s timeout. |
 | `webfetch` | Fetch and extract text from an HTTP(S) URL. |
-| `websearch` | Search DuckDuckGo's HTML endpoint and return compact results. |
+| `websearch` | Search Startpage and return compact results. Supports `category='web'` (default) or `category='images'`; image results include direct image URLs and thumbnail URLs. |
 
 Tool errors are returned to the model as strings so it can recover. `bash` uses
 the current user account and is not sandboxed.

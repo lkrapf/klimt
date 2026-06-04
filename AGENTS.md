@@ -116,7 +116,7 @@ The model has six tools:
 - `write(path, content)`
 - `bash(command)`
 - `webfetch(url)`
-- `websearch(query)`
+- `websearch(query, category='web'|'images')`
 
 Notes:
 

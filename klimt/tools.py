@@ -3,6 +3,11 @@
 Tools: read, edit, write, bash, webfetch, websearch, glob, grep. Each returns
 a string. Errors are returned as strings (not raised) so the model can see
 them and recover.
+
+websearch supports two categories:
+  - ``web`` (default): returns titles, URLs, and snippets.
+  - ``images``: returns titles, direct image URLs, thumbnail URLs, and source
+    page URLs.
 """
 from __future__ import annotations
 
@@ -23,6 +28,7 @@ BASH_TIMEOUT = 120  # seconds
 WEBFETCH_TIMEOUT = 30  # seconds
 WEBFETCH_MAX_BYTES = 2_000_000
 WEBSEARCH_MAX_RESULTS = 5
+WEBSEARCH_MAX_IMAGE_RESULTS = 15
 WEBFETCH_MAX_TEXT_CHARS = 200_000
 WEBFETCH_MAX_LINKS = 40
 READ_MAX_LINES = 2000
@@ -123,11 +129,12 @@ SCHEMAS = [
         "type": "function",
         "function": {
             "name": "websearch",
-            "description": "Search the web with DuckDuckGo and return compact result titles, URLs, and snippets.",
+            "description": "Search the web with Startpage and return compact result titles, URLs, and snippets. Use category='images' to search for images instead; image results include direct image URLs and thumbnail URLs suitable for inline display.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "Search query."},
+                    "category": {"type": "string", "enum": ["web", "images"], "description": "Search category. Defaults to 'web'."},
                 },
                 "required": ["query"],
             },
@@ -332,6 +339,94 @@ class _HTMLTextParser(html.parser.HTMLParser):
             self.parts.append("\n")
 
 
+class _StartpageImageParser(html.parser.HTMLParser):
+    """Parse image search results from Startpage HTML.
+
+    Image results are in ``<div class="image-container ..." data-thumbnail-url="...">``
+    elements. The raw image URL and source page URL are in a nested ``<img>``
+    ``data-thumbnail-url`` attribute on the container and ``clickUrl`` / ``rawImageUrl``
+    fields embedded in the page's JSON data blob.
+
+    Rather than trying to parse the JS blob we extract what we need directly
+    from the HTML attributes that are present in the noscript/static markup:
+    - ``data-thumbnail-url`` on the container div  → thumbnail (Bing CDN)
+    - ``piurl=`` query param inside that URL        → raw image URL
+    - ``aria-label`` on the container div           → title
+    - source hostname from the sibling ``<span>``   → display URL
+    """
+
+    _skip_tags = {"script", "style", "template", "svg"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.results: list[dict[str, str]] = []
+        self._current: dict[str, str] | None = None
+        self._in_skip = 0
+        self._in_source_span = False
+
+    @staticmethod
+    def _decode_piurl(thumbnail_url: str) -> str:
+        """Extract and decode the piurl parameter from a Startpage proxy URL."""
+        try:
+            qs = urllib.parse.urlparse(thumbnail_url).query
+            params = urllib.parse.parse_qs(qs)
+            piurls = params.get("piurl") or params.get("piUrl")
+            if piurls:
+                return piurls[0]
+        except Exception:
+            pass
+        return ""
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in self._skip_tags:
+            self._in_skip += 1
+            return
+        if self._in_skip:
+            return
+
+        attrs_dict = dict(attrs)
+        cls = attrs_dict.get("class") or ""
+
+        if tag == "div" and "image-container" in cls:
+            thumbnail_url = attrs_dict.get("data-thumbnail-url") or ""
+            title = attrs_dict.get("aria-label") or ""
+            # strip "click to expand image: " prefix Startpage adds
+            if title.lower().startswith("click to expand image:"):
+                title = title[len("click to expand image:"):].strip()
+            raw_image_url = self._decode_piurl(thumbnail_url)
+            self._current = {
+                "title": title,
+                "thumbnail_url": thumbnail_url,
+                "image_url": raw_image_url,
+                "source_url": "",
+            }
+            return
+
+        if self._current is not None and tag == "span" and "css-1pi0dfq" in cls:
+            self._in_source_span = True
+
+    def handle_data(self, data: str) -> None:
+        if self._in_skip or self._current is None:
+            return
+        if self._in_source_span:
+            self._current["source_url"] += data
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in self._skip_tags:
+            if self._in_skip:
+                self._in_skip -= 1
+            return
+        if self._in_skip:
+            return
+        if tag == "span" and self._in_source_span:
+            self._in_source_span = False
+        if tag == "div" and self._current is not None:
+            if self._current.get("image_url"):
+                self.results.append(self._current)
+            self._current = None
+            self._in_source_span = False
+
+
 class _StartpageHTMLParser(html.parser.HTMLParser):
     """Parse search results from Startpage HTML.
 
@@ -466,12 +561,11 @@ def _html_to_text(body: str, base_url: str) -> tuple[str, list[tuple[str, str]]]
     return text, links
 
 
-def _websearch(query: str) -> str:
-    query = query.strip()
-    if not query:
-        return "error: empty query"
-
-    url = "https://www.startpage.com/sp/search?" + urllib.parse.urlencode({"query": query})
+def _startpage_fetch(query: str, category: str) -> str:
+    """Fetch raw HTML from Startpage for the given query and category."""
+    url = "https://www.startpage.com/sp/search?" + urllib.parse.urlencode(
+        {"query": query, "cat": category}
+    )
     req = urllib.request.Request(
         url,
         headers={
@@ -482,9 +576,20 @@ def _websearch(query: str) -> str:
     with urllib.request.urlopen(req, timeout=WEBFETCH_TIMEOUT) as r:  # noqa: S310
         raw = r.read(WEBFETCH_MAX_BYTES)
         charset = r.headers.get_content_charset() or "utf-8"
+    return raw.decode(charset, errors="replace")
 
+
+def _websearch(query: str, category: str = "web") -> str:
+    query = query.strip()
+    if not query:
+        return "error: empty query"
+
+    if category == "images":
+        return _websearch_images(query)
+
+    html_text = _startpage_fetch(query, "web")
     parser = _StartpageHTMLParser()
-    parser.feed(raw.decode(charset, errors="replace"))
+    parser.feed(html_text)
     results = [
         {
             "title": _clean_text(item.get("title", "")),
@@ -504,6 +609,35 @@ def _websearch(query: str) -> str:
         lines.append(f"   {item['url']}")
         if item["snippet"]:
             lines.append(f"   {item['snippet']}")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
+def _websearch_images(query: str) -> str:
+    html_text = _startpage_fetch(query, "images")
+    parser = _StartpageImageParser()
+    parser.feed(html_text)
+    results = [
+        {
+            "title": _clean_text(item.get("title", "")),
+            "image_url": _clean_text(item.get("image_url", "")),
+            "thumbnail_url": _clean_text(item.get("thumbnail_url", "")),
+            "source_url": _clean_text(item.get("source_url", "")),
+        }
+        for item in parser.results
+        if item.get("image_url")
+    ][:WEBSEARCH_MAX_IMAGE_RESULTS]
+
+    if not results:
+        return f"no image results for: {query}"
+
+    lines = [f"query: {query}", ""]
+    for i, item in enumerate(results, 1):
+        lines.append(f"{i}. {item['title']}")
+        lines.append(f"   image:     {item['image_url']}")
+        lines.append(f"   thumbnail: {item['thumbnail_url']}")
+        if item["source_url"]:
+            lines.append(f"   source:    {item['source_url']}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
@@ -774,7 +908,7 @@ def run(name: str, args: Dict[str, Any], cancel: Event | None = None, cwd: str |
         if name == "webfetch":
             return _webfetch(args["url"])
         if name == "websearch":
-            return _websearch(args["query"])
+            return _websearch(args["query"], args.get("category", "web"))
         if name == "glob":
             return _glob(args["pattern"], args.get("path"), cwd)
         if name == "grep":

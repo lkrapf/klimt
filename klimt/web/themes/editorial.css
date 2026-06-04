@@ -1,9 +1,9 @@
 /* editorial — clean paper, Swiss-inspired.
-   Humanist sans (Source Sans 3) for prose, Source Code Pro for code.
+   Humanist sans (Myriad Pro) for prose, Source Code Pro for code.
    Warm paper ground, near-black ink, one blue accent, hairline rules.
    All structural chrome lives in app.css.  This file is palette + decoration only. */
 
-@import url("https://fonts.googleapis.com/css2?family=Source+Sans+3:ital,wght@0,400;0,600;0,700;1,400&family=Source+Code+Pro:wght@400;600&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Source+Code+Pro:wght@400;600&display=swap");
 
 :root {
   --bg:          #f7f6f2;      /* warm paper */
@@ -13,7 +13,7 @@
   --border:      #dcd9d1;      /* hairline neutral */
   --accent-red:  #b23b30;
   --tint:        #efeee8;      /* code/panel ground */
-  --sans:        "Source Sans 3", "Open Sans", "Segoe UI", system-ui, sans-serif;
+  --sans:        "Myriad Pro", "Source Sans 3", "Open Sans", "Segoe UI", system-ui, sans-serif;
   --mono:        "Source Code Pro", "IBM Plex Mono", "Menlo", ui-monospace, monospace;
   --glow:        none;
 }
