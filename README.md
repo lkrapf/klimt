@@ -218,13 +218,16 @@ skill description.
 | `/help` | Show built-in commands and session help. |
 | `/hotkeys` | Show keyboard shortcuts. |
 | `/skills` | List discovered skills. |
+| `/agents` | List available subagents (built-in, user, and project). |
 | `/compact [N]` | Compact older context, keeping the last N history messages raw. Default: 8. |
+| `/cd [path]` | Show or change the current working directory for this session. |
 | `/model [name]` | Show configured models or switch the model endpoint for this session. |
+| `/theme [name]` | Show or switch the UI CSS theme. Use Tab to complete names. |
 | `/new` | Start a new empty session. |
 | `/session <name>` | Resume a saved session. Use Tab to complete names. |
 | `/sessions` | List saved sessions for this folder. |
-| `/sessions resume <number|name>` | Resume a saved session. |
-| `/sessions delete <number|name>` | Delete a saved session. |
+| `/sessions resume <number\|name>` | Resume a saved session. |
+| `/sessions delete <number\|name>` | Delete a saved session. |
 | `/sessions clear confirm` | Delete all saved sessions for this folder and start a new one. |
 | `/save [name]` | Save this session to disk, optionally under a new name. |
 | `/reload` | Reload prompt layers, skills, tools, model config, and CSS. |
@@ -277,6 +280,8 @@ shown separately when the provider streams them.
 | `bash` | Run a shell command with a 120s timeout. |
 | `webfetch` | Fetch and extract text from an HTTP(S) URL. |
 | `websearch` | Search Startpage and return compact results. Supports `category='web'` (default) or `category='images'`; image results include direct image URLs and thumbnail URLs. |
+| `glob` | List files matching a shell-style glob pattern, sorted by most recently modified. |
+| `grep` | Search file contents with `ag` (the_silver_searcher). Supports regex, glob filter, and case-insensitive matching. |
 
 Tool errors are returned to the model as strings so it can recover. `bash` uses
 the current user account and is not sandboxed.
@@ -312,18 +317,24 @@ user prompt. `/sessions` lists saved sessions for the current folder.
 
 ```text
 klimt/
-  KERNEL.md        # non-persona harness prompt
-  prompt.py        # prompt assembly and AGENTS.md discovery
-  app.py           # pywebview window + JS bridge
-  api.py           # ChatSession: history, persistence, compaction
-  runner.py        # streaming model/tool turn loop
-  providers.py     # provider adapter around OpenAI-compatible clients
-  model_config.py  # ~/.klimt/models.json parsing
-  commands.py      # slash/bang command metadata and handling helpers
-  tools.py         # tool implementations + JSON schemas
-  skills.py        # ~/.klimt/skills discovery
-  session_store.py # per-folder session persistence
-  web/             # frontend
+  KERNEL.md         # non-persona harness prompt
+  prompt.py         # prompt assembly and AGENTS.md discovery
+  app.py            # pywebview window + JS bridge
+  api.py            # ChatSession: history, persistence, compaction
+  api_types.py      # shared dataclasses for session/event payloads
+  runner.py         # streaming model/tool turn loop
+  providers.py      # provider adapter around OpenAI-compatible clients
+  anthropic_oauth.py# Anthropic OAuth Authorization Code + PKCE flow
+  model_config.py   # ~/.klimt/models.json parsing
+  commands.py       # slash/bang command metadata and handling helpers
+  completion.py     # Tab-completion for commands, paths, models, sessions
+  tools.py          # tool implementations + JSON schemas
+  agents.py         # subagent manifest discovery
+  agent_runner.py   # subagent execution with scoped tools and prompts
+  skills.py         # ~/.klimt/skills discovery
+  session_store.py  # per-folder session persistence
+  themes.py         # CSS theme discovery and switching
+  web/              # frontend
 ```
 
 Python owns conversation history. JS calls `window.pywebview.api.send(text)`.
