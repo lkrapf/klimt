@@ -1,5 +1,5 @@
 const THEME_LINK_ID = "theme-css";
-const DEFAULT_THEME = "amber";
+const DEFAULT_THEME = "editorial";
 const THEME_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 function safeThemeName(name) {

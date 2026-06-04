@@ -7,7 +7,7 @@ from pathlib import Path
 WEB_DIR = Path(__file__).parent / "web"
 THEMES_DIR = WEB_DIR / "themes"
 STATE_PATH = Path.home() / ".klimt" / "theme"
-DEFAULT_THEME = "amber"
+DEFAULT_THEME = "editorial"
 _THEME_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
