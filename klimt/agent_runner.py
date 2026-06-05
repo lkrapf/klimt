@@ -52,7 +52,7 @@ _SYNTHESIS_NUDGE = (
 # Same parallel ceiling as the parent runner for read-only barrier groups.
 _MAX_PARALLEL_TOOLS = 8
 
-_READ_ONLY_TOOLS = frozenset({"read", "glob", "grep", "webfetch", "websearch"})
+_READ_ONLY_TOOLS = tools_mod.READ_ONLY_TOOLS
 
 
 @dataclass

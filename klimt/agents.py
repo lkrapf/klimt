@@ -19,16 +19,18 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Iterable
 
+from . import tools as _tools_mod
+
 # Tools the parent may grant to a subagent. The `agent` tool is intentionally
 # absent: no nested delegation in the first cut.
-ALL_TOOLS: tuple[str, ...] = (
-    "read", "glob", "grep", "edit", "write", "bash", "webfetch", "websearch",
-)
-
-READ_TOOLS: tuple[str, ...] = ("read", "glob", "grep", "webfetch", "websearch")
+#
+# Derived from tools.SPECS so adding a new tool automatically participates in
+# subagent allowlists.
+ALL_TOOLS: tuple[str, ...] = _tools_mod.ALL_TOOL_NAMES
+READ_TOOLS: tuple[str, ...] = tuple(s.name for s in _tools_mod.SPECS if s.read_only)
 FULL_TOOLS: tuple[str, ...] = ALL_TOOLS
 
-MUTATING_TOOLS = frozenset({"edit", "write", "bash"})
+MUTATING_TOOLS: frozenset[str] = _tools_mod.MUTATING_TOOLS
 
 DEFAULT_MAX_TURNS = 6
 

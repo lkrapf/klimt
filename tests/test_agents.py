@@ -199,7 +199,9 @@ def test_catalog_manifest_shape():
     assert "<available_agents>" in out
     assert "<name>read-only</name>" in out
     assert "<mode>read</mode>" in out
-    assert "read, glob, grep, webfetch, websearch" in out
+    # Order follows tools.SPECS; assert membership rather than a fixed sequence.
+    for name in ("read", "glob", "grep", "webfetch", "websearch"):
+        assert name in out
 
 
 def test_catalog_manifest_read_write():

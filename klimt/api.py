@@ -352,8 +352,7 @@ class ChatSession:
         return schemas
 
     def _is_read_only(self, name: str, args: Dict[str, Any]) -> bool:
-        from .runner import READ_ONLY_TOOLS
-        if name in READ_ONLY_TOOLS:
+        if name in tools_mod.READ_ONLY_TOOLS:
             return True
         if name == "agent":
             target = (args.get("name") or "").strip() or "read-only"

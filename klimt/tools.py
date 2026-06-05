@@ -19,10 +19,11 @@ import subprocess
 import time
 import urllib.parse
 import urllib.request
+from dataclasses import dataclass
 from pathlib import Path
 import threading
 from threading import Event
-from typing import Any, Dict
+from typing import Any, Callable, Dict
 
 BASH_TIMEOUT = 120  # seconds
 WEBFETCH_TIMEOUT = 30  # seconds
@@ -38,7 +39,43 @@ GREP_TIMEOUT = 30  # seconds
 GREP_MAX_LINES = 500
 GREP_MAX_BYTES = 200_000
 
-SCHEMAS = [
+
+ToolRunner = Callable[[Dict[str, Any], "Event | None", "str | None"], str]
+
+
+@dataclass(frozen=True)
+class ToolSpec:
+    """One tool: name, JSON schema, dispatch target, side-effect classification.
+
+    `run` accepts (args, cancel, cwd). Tools that ignore some of those still
+    take the same signature so dispatch stays uniform.
+
+    `read_only=True` means the tool has no observable side effects on the
+    working tree, network state we own, or subagent state, and may be safely
+    parallelized with other read-only tools inside a barrier group.
+    """
+    name: str
+    description: str
+    parameters: Dict[str, Any]
+    run: ToolRunner
+    read_only: bool
+
+    @property
+    def schema(self) -> Dict[str, Any]:
+        return {
+            "type": "function",
+            "function": {
+                "name": self.name,
+                "description": self.description,
+                "parameters": self.parameters,
+            },
+        }
+
+
+# Raw schemas list; kept as a literal for clarity. Each entry below is paired
+# with a dispatch target and a read_only flag in SPECS at the bottom of the
+# module.
+_SCHEMAS_RAW = [
     {
         "type": "function",
         "function": {
@@ -173,6 +210,13 @@ SCHEMAS = [
         },
     },
 ]
+
+
+def _schema_by_name(name: str) -> Dict[str, Any]:
+    for s in _SCHEMAS_RAW:
+        if s.get("function", {}).get("name") == name:
+            return s["function"]
+    raise KeyError(f"no schema defined for tool {name!r}")
 
 
 def _resolve_path(path: str, cwd: str | None = None) -> Path:
@@ -895,31 +939,93 @@ def _bash(command: str, cancel: Event | None = None, cwd: str | None = None) -> 
     return _format_result(p.returncode, stdout, stderr)
 
 
+# --- dispatch adapters ------------------------------------------------------
+#
+# Each adapter pulls fields out of the args dict and calls the typed
+# implementation. Keeping these next to ToolSpec makes the signature contract
+# obvious and avoids the giant if/elif chain that lived in run().
+
+
+def _run_read(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _read(args["path"], args.get("offset", 1), args.get("limit"), cwd)
+
+
+def _run_edit(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _edit(args["path"], args["edits"], cwd)
+
+
+def _run_write(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _write(args["path"], args["content"], cwd)
+
+
+def _run_bash(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _bash(args["command"], cancel, cwd)
+
+
+def _run_webfetch(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _webfetch(args["url"])
+
+
+def _run_websearch(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _websearch(args["query"], args.get("category", "web"))
+
+
+def _run_glob(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _glob(args["pattern"], args.get("path"), cwd)
+
+
+def _run_grep(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _grep(
+        args["pattern"],
+        path=args.get("path"),
+        glob_filter=args.get("glob"),
+        case_insensitive=bool(args.get("case_insensitive")),
+        cancel=cancel,
+        cwd=cwd,
+    )
+
+
+# --- registry ---------------------------------------------------------------
+#
+# Single source of truth: name, description, parameters, dispatch, read-only.
+# SCHEMAS and the run() dispatcher are derived from SPECS.
+
+SPECS: tuple[ToolSpec, ...] = tuple(
+    ToolSpec(
+        name=name,
+        description=str(_schema_by_name(name)["description"]),
+        parameters=dict(_schema_by_name(name)["parameters"]),
+        run=runner,
+        read_only=read_only,
+    )
+    for name, runner, read_only in (
+        ("read", _run_read, True),
+        ("edit", _run_edit, False),
+        ("write", _run_write, False),
+        ("bash", _run_bash, False),
+        ("webfetch", _run_webfetch, True),
+        ("websearch", _run_websearch, True),
+        ("glob", _run_glob, True),
+        ("grep", _run_grep, True),
+    )
+)
+
+SPECS_BY_NAME: dict[str, ToolSpec] = {s.name: s for s in SPECS}
+
+SCHEMAS = [s.schema for s in SPECS]
+
+READ_ONLY_TOOLS: frozenset[str] = frozenset(s.name for s in SPECS if s.read_only)
+
+MUTATING_TOOLS: frozenset[str] = frozenset(s.name for s in SPECS if not s.read_only)
+
+ALL_TOOL_NAMES: tuple[str, ...] = tuple(s.name for s in SPECS)
+
+
 def run(name: str, args: Dict[str, Any], cancel: Event | None = None, cwd: str | None = None) -> str:
-    try:
-        if name == "read":
-            return _read(args["path"], args.get("offset", 1), args.get("limit"), cwd)
-        if name == "edit":
-            return _edit(args["path"], args["edits"], cwd)
-        if name == "write":
-            return _write(args["path"], args["content"], cwd)
-        if name == "bash":
-            return _bash(args["command"], cancel, cwd)
-        if name == "webfetch":
-            return _webfetch(args["url"])
-        if name == "websearch":
-            return _websearch(args["query"], args.get("category", "web"))
-        if name == "glob":
-            return _glob(args["pattern"], args.get("path"), cwd)
-        if name == "grep":
-            return _grep(
-                args["pattern"],
-                path=args.get("path"),
-                glob_filter=args.get("glob"),
-                case_insensitive=bool(args.get("case_insensitive")),
-                cancel=cancel,
-                cwd=cwd,
-            )
+    spec = SPECS_BY_NAME.get(name)
+    if spec is None:
         return f"error: unknown tool {name!r}"
+    try:
+        return spec.run(args, cancel, cwd)
     except Exception as e:  # noqa: BLE001
         return f"error: {type(e).__name__}: {e}"
