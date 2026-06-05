@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import copy
-import importlib
 import json
 import os
 import contextlib
@@ -15,9 +14,9 @@ from typing import Any
 
 import webview
 
-from . import __version__, agents, commands, completion, presenters, prompt, skills, themes, tools
+from . import __version__, agents, command_handlers, commands, completion, prompt, skills, themes, tools
 from .api import ChatSession
-from .model_config import default_model_name, list_model_configs, list_model_names
+from .model_config import default_model_name, list_model_names
 
 WEB_DIR = Path(__file__).parent / "web"
 ASSETS_DIR = Path(__file__).parent / "assets"
@@ -178,54 +177,7 @@ class _SingleTabApi:
             return self._busy
 
     def _handle_command(self, command: str, spec: commands.CommandSpec) -> bool:
-        if command == "/new":
-            self._new()
-            return True
-        if command == "/session" or command.startswith("/session "):
-            self._resume_session(command[8:].strip(), usage="/session <name>")
-            return True
-        if command == "/sessions" or command.startswith("/sessions "):
-            self._sessions(command[9:].strip())
-            return True
-        if command == "/compact" or command.startswith("/compact "):
-            self._compact(command[8:].strip())
-            return True
-        if command == "/cd" or command.startswith("/cd "):
-            self._cd(command[3:].strip())
-            return True
-        if command == "/help":
-            self._help()
-            return True
-        if command == "/hotkeys":
-            self._hotkeys()
-            return True
-        if command == "/skills":
-            self._skills()
-            return True
-        if command == "/agents":
-            self._agents()
-            return True
-        if command == "/reload":
-            self._reload()
-            return True
-        if command == "/theme" or command.startswith("/theme "):
-            self._theme(command[6:].strip())
-            return True
-        if command == "/quit":
-            self._quit()
-            return True
-        if command == "/save" or command.startswith("/save "):
-            self._save(command[5:].strip())
-            return True
-        if command == "/model" or command.startswith("/model "):
-            self._model(command[6:].strip())
-            return True
-        if command.startswith("/"):
-            for e in commands.load_skill(self._session, command[1:].strip()):
-                self._emit(e)
-            self._session.persist()
-            return True
-        return False
+        return command_handlers.dispatch(command_handlers.CommandContext(self), command)
 
     def _shell_worker(self, command: str) -> None:
         try:
@@ -341,230 +293,6 @@ class _SingleTabApi:
             "available_tools": available_tools,
             "tools": available_tools,
         }
-
-    def _help(self) -> None:
-        self._emit({"type": "text", "content": commands.help_markdown()})
-
-    def _hotkeys(self) -> None:
-        self._emit({"type": "text", "content": commands.hotkeys_markdown()})
-
-    def _skills(self) -> None:
-        self._emit({"type": "text", "content": presenters.skills_markdown(skills.list_skills())})
-
-    def _agents(self) -> None:
-        from .model_config import list_model_classes
-        items = agents.list_agents(self._session.cwd)
-        self._emit({"type": "text", "content": presenters.agents_markdown(items, list_model_classes())})
-
-    def _cd(self, arg: str) -> None:
-        if not arg:
-            self._emit({"type": "text", "content": f"cwd: `{presenters.md_escape(self._session.cwd)}`\n\n_usage: `/cd <path>`_"})
-            return
-
-        wanted = Path(arg).expanduser()
-        if not wanted.is_absolute():
-            wanted = Path(self._session.cwd) / wanted
-        try:
-            resolved = wanted.resolve(strict=True)
-        except FileNotFoundError:
-            self._emit({"type": "text", "content": f"_no such directory: `{presenters.md_escape(arg)}`_"})
-            return
-        if not resolved.is_dir():
-            self._emit({"type": "text", "content": f"_not a directory: `{presenters.md_escape(arg)}`_"})
-            return
-
-        self._session.cwd = str(resolved)
-        self._session.system = _build_system_prompt(self._session.cwd)
-        self._session.store = self._session.store.for_folder(self._session.cwd)
-        self._session.persist()
-        self._sync_input_history()
-        self._emit({"type": "text", "content": f"cwd set to `{presenters.md_escape(self._session.cwd)}`"})
-
-    def _compact(self, arg: str) -> None:
-        keep_recent = 8
-        if arg:
-            try:
-                keep_recent = int(arg)
-            except ValueError:
-                self._emit({"type": "text", "content": "_usage: `/compact [recent-message-count]`_"})
-                return
-        self._emit({"type": "text", "content": f"compacting context, keeping last {keep_recent} messages raw..."})
-        result = self._session.compact(keep_recent)
-        self._replay_session()
-        self._sync_input_history()
-        self._emit({"type": "text", "content": result})
-
-    def _list_sessions(self) -> None:
-        sessions = self._session.list_sessions()
-        self._session_choices = sessions
-        self._emit({"type": "text", "content": presenters.sessions_markdown(sessions)})
-
-    def _resolve_session_name(self, arg: str) -> str:
-        """Resolve a session name or index from the latest `/sessions` list."""
-        name = arg.strip()
-        if not name:
-            return ""
-        if not name.isdecimal():
-            return name
-
-        index = int(name)
-        if index <= 0:
-            return name
-
-        if not self._session_choices:
-            self._session_choices = self._session.list_sessions()
-
-        if 1 <= index <= len(self._session_choices):
-            return str(self._session_choices[index - 1].get("name") or "")
-
-        return name
-
-    def _new(self) -> None:
-        prior_model = self._session.model
-        self._session.interrupt()
-        self._session = _new_session(self._session.cwd, model=prior_model)
-        self._session_choices = []
-        self._emit({"type": "clear"})
-        self._sync_input_history()
-        self._emit({"type": "text", "content": f"new session **{presenters.md_escape(self._session.session_name)}**"})
-
-    def _sessions(self, arg: str) -> None:
-        if not arg:
-            self._list_sessions()
-            return
-
-        cmd, _, rest = arg.partition(" ")
-        if cmd == "resume" and rest.strip():
-            self._resume_session(rest.strip(), usage="/sessions resume <number|name>")
-            return
-        if cmd == "delete" and rest.strip():
-            self._delete_session(rest.strip())
-            return
-        if cmd == "clear" and rest.strip() == "confirm":
-            self._clear_sessions()
-            return
-
-        self._emit({"type": "text", "content": "_usage: `/sessions`, `/sessions resume <number|name>`, `/sessions delete <number|name>`, or `/sessions clear confirm`_"})
-
-    def _delete_session(self, target: str) -> None:
-        name = self._resolve_session_name(target)
-        if not self._session.store.exists(name):
-            self._emit({"type": "text", "content": f"_unknown session: `{presenters.md_escape(target)}`_"})
-            return
-
-        active = name == self._session.session_name
-        self._session.store.delete(name)
-        self._session_choices = []
-        if active:
-            self._new()
-            self._emit({"type": "text", "content": f"deleted active session **{presenters.md_escape(name)}**"})
-            return
-
-        self._emit({"type": "text", "content": f"deleted session **{presenters.md_escape(name)}**"})
-        self._list_sessions()
-
-    def _clear_sessions(self) -> None:
-        prior_model = self._session.model
-        self._session.interrupt()
-        old_cwd = self._session.cwd
-        self._session.store.clear()
-        self._session = _new_session(old_cwd, model=prior_model)
-        self._session_choices = []
-        self._emit({"type": "clear"})
-        self._sync_input_history()
-        self._emit({"type": "text", "content": "deleted all sessions for this folder"})
-        self._emit({"type": "text", "content": f"new session **{presenters.md_escape(self._session.session_name)}**"})
-
-    def _resume_session(self, name: str, usage: str) -> None:
-        if not name:
-            self._emit({"type": "text", "content": f"_usage: `{usage}`_"})
-            return
-
-        requested = name.strip()
-        resolved = self._resolve_session_name(requested)
-        if not self._session.load_session(resolved):
-            hint = ""
-            if requested.isdecimal():
-                hint = "\n\nRun `/sessions` to refresh the numbered list."
-            self._emit({
-                "type": "text",
-                "content": f"_unknown session: `{presenters.md_escape(requested)}`_{hint}",
-            })
-            return
-
-        self._session_choices = []
-        self._replay_session()
-        self._sync_input_history()
-        self._emit({"type": "text", "content": f"resumed session **{presenters.md_escape(self._session.session_name)}**"})
-
-    def _save(self, name: str) -> None:
-        already_kept = self._session.kept
-        self._session.rename_session(name) if name else self._session.keep()
-        self._sync_input_history()
-        if already_kept and not name:
-            state = "saved" if self._session.kept else "not saved (in memory only)"
-            self._emit({"type": "text", "content": f"session **{presenters.md_escape(self._session.session_name)}** — {state}\n\n_usage: `/save <name>` to rename_"})
-            return
-        self._emit({"type": "text", "content": f"saved session **{presenters.md_escape(self._session.session_name)}**"})
-
-    def _theme(self, theme: str) -> None:
-        choices = themes.list_theme_names()
-        current = self._get_theme()
-        if not theme:
-            self._emit({"type": "text", "content": presenters.themes_markdown(choices, current)})
-            return
-
-        requested = theme.strip()
-        if requested not in choices:
-            self._emit({"type": "text", "content": presenters.unknown_choice_markdown("theme", requested, choices)})
-            return
-
-        self._set_theme(requested)
-        self._emit({"type": "theme", "name": requested})
-        self._emit({"type": "text", "content": f"theme set to **{presenters.md_escape(requested)}**"})
-
-    def _model(self, model: str) -> None:
-        configs = list_model_configs()
-        choices = [cfg.name for cfg in configs]
-        if not model:
-            self._emit({"type": "text", "content": presenters.models_markdown(configs, self._session.model)})
-            return
-
-        requested = model.strip()
-        if requested not in choices:
-            self._emit({
-                "type": "text",
-                "content": presenters.unknown_choice_markdown(
-                    "model",
-                    requested,
-                    choices,
-                    empty_hint="_none; create `~/.klimt/models.json`_",
-                ),
-            })
-            return
-
-        self._session.interrupt()
-        self._session.model = requested
-        self._session.reload_client()
-        self._session.persist()
-        self._sync_input_history()
-        self._emit({"type": "text", "content": f"model set to **{presenters.md_escape(requested)}**"})
-
-    def _reload(self) -> None:
-        """Reload local config, prompt layers, skill/tool modules, model config, and CSS."""
-        importlib.reload(prompt)
-        importlib.reload(skills)
-        importlib.reload(tools)
-        self._session.system = _build_system_prompt(self._session.cwd)
-        self._session.reload_client()
-        self._emit({"type": "theme", "name": self._get_theme()})
-        self._emit({"type": "reload_css"})
-        self._sync_input_history()
-        self._emit({"type": "text", "content": "reloaded config, skills, tools, model endpoint, and CSS"})
-
-    def _quit(self) -> None:
-        """Exit the process immediately."""
-        os._exit(0)
 
 
 class Api:
