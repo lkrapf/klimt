@@ -1,139 +1,26 @@
-"""Streaming wrapper around Azure OpenAI Chat Completions, with tool calling."""
+"""ChatSession: turn loop, persistence, model lifecycle.
+
+Kept deliberately thin. Context-window math lives in klimt.context_usage;
+lossy compaction lives in klimt.compaction; tool dispatch and turn streaming
+live in klimt.runner / klimt.tool_runner.
+"""
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import threading
 from pathlib import Path
-from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from typing import Any, Dict, List
 
 from . import agent_runner, agents as agents_mod, tools as tools_mod
+from . import compaction as compaction_mod
+from . import context_usage as context_usage_mod
 from .api_types import Emit
 from .model_config import ModelConfig, list_model_classes, list_model_names, resolve_model_config
 from .providers import ChatProvider
 from .runner import run_turn
 from .session_store import DEFAULT_SESSION, UNTITLED_PREFIX, SessionStore, random_session_name, title_from_prompt
-
-COMPACTION_PROMPT = """You compact old chat history into durable working state.
-
-This is lossy compression. Preserve only information likely to matter later, but
-be specific where specificity matters. Do not invent facts. Distinguish user
-facts, assistant assumptions, decisions, constraints, and unresolved questions.
-
-Return Markdown with this shape:
-
-# Compacted context
-
-## Current objective
-- ...
-
-## Active constraints and preferences
-- ...
-
-## Known facts
-- ...
-
-## Decisions / rejected options
-- ...
-
-## Open questions / risks
-- ...
-
-## References and provenance
-- Mention important files, URLs, commands, tool outputs, or message ranges when relevant.
-
-## Continuation notes
-- What the assistant should keep in mind for the next turn.
-
-If a section has nothing useful, write `- none`.
-"""
-
-
-def _message_for_compaction(msg: Dict[str, Any], index: int) -> str:
-    """Stable, readable transcript entry for compaction."""
-    clean = {k: v for k, v in msg.items() if k != "usage"}
-    return f"<message index={index} role={clean.get('role', '')}>\n" + json.dumps(
-        clean,
-        ensure_ascii=False,
-        indent=2,
-    ) + "\n</message>"
-
-
-def _chunk_messages(messages: List[Dict[str, Any]], max_tokens: int) -> List[List[Dict[str, Any]]]:
-    chunks: List[List[Dict[str, Any]]] = []
-    current: List[Dict[str, Any]] = []
-    current_tokens = 0
-    for msg in messages:
-        tokens = max(1, _estimate_tokens(msg))
-        if current and current_tokens + tokens > max_tokens:
-            chunks.append(current)
-            current = []
-            current_tokens = 0
-        current.append(msg)
-        current_tokens += tokens
-    if current:
-        chunks.append(current)
-    return chunks
-
-
-def _context_tokens_from_usage(usage: Dict[str, Any]) -> int:
-    return int(usage.get("totalTokens") or (
-        int(usage.get("input") or 0)
-        + int(usage.get("output") or 0)
-        + int(usage.get("cacheRead") or 0)
-        + int(usage.get("cacheWrite") or 0)
-    ))
-
-
-def _estimate_tokens(msg: Dict[str, Any]) -> int:
-    """Cheap chars/4 heuristic, matching Pi's fallback strategy."""
-    chars = 0
-    content = msg.get("content")
-    if isinstance(content, str):
-        chars += len(content)
-    elif isinstance(content, list):
-        for block in content:
-            if isinstance(block, dict):
-                if block.get("type") == "text":
-                    chars += len(block.get("text") or "")
-                elif block.get("type") == "image":
-                    chars += 4800
-    for tc in msg.get("tool_calls") or []:
-        fn = tc.get("function") or {}
-        chars += len(fn.get("name") or "") + len(fn.get("arguments") or "")
-    return max(0, (chars + 3) // 4)
-
-
-def _estimate_context_tokens(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    last_usage_index = None
-    last_usage = None
-    for i in range(len(messages) - 1, -1, -1):
-        msg = messages[i]
-        if msg.get("role") == "assistant" and msg.get("usage"):
-            last_usage_index = i
-            last_usage = msg["usage"]
-            break
-
-    if last_usage_index is None:
-        estimated = sum(_estimate_tokens(m) for m in messages)
-        return {
-            "tokens": estimated,
-            "usageTokens": 0,
-            "trailingTokens": estimated,
-            "lastUsageIndex": None,
-        }
-
-    usage_tokens = _context_tokens_from_usage(last_usage)
-    trailing = sum(_estimate_tokens(m) for m in messages[last_usage_index + 1:])
-    return {
-        "tokens": usage_tokens + trailing,
-        "usageTokens": usage_tokens,
-        "trailingTokens": trailing,
-        "lastUsageIndex": last_usage_index,
-    }
 
 
 @dataclass
@@ -246,26 +133,11 @@ class ChatSession:
         return self.store.list()
 
     def context_usage(self) -> Dict[str, Any]:
-        messages = []
-        if self.system:
-            messages.append({"role": "system", "content": self.system})
-        messages.extend(self.history)
-        estimate = _estimate_context_tokens(messages)
-
-        window = self.model_config().context_window
-        if window <= 0:
-            return {
-                "tokens": estimate["tokens"],
-                "contextWindow": 0,
-                "percent": None,
-            }
-
-        percent = (estimate["tokens"] / window) * 100
-        return {
-            "tokens": estimate["tokens"],
-            "contextWindow": window,
-            "percent": percent,
-        }
+        return context_usage_mod.context_usage(
+            self.system,
+            self.history,
+            self.model_config().context_window,
+        )
 
     def compact(self, keep_recent: int = 8) -> str:
         """Compact older history into a structured state note.
@@ -274,64 +146,21 @@ class ChatSession:
         boundary is where lossy summaries hurt most. Tool-call adjacency is also
         preserved by moving the cutoff left if needed.
         """
-        keep_recent = max(0, min(int(keep_recent), len(self.history)))
-        cutoff = len(self.history) - keep_recent
-        while 0 < cutoff < len(self.history) and self.history[cutoff].get("role") == "tool":
-            cutoff -= 1
-
-        old = self.history[:cutoff]
-        # Usage metadata on retained assistant messages describes the pre-compaction
-        # request context. Once old history is replaced by a summary, those totals
-        # are stale, so drop them and let context_usage() estimate the new history.
-        recent = [
-            {k: v for k, v in msg.items() if k != "usage"}
-            for msg in self.history[cutoff:]
-        ]
-        if not old:
-            return "nothing to compact"
-
-        chunk_budget = int(os.environ.get("KLIMT_COMPACTION_CHUNK_TOKENS", "24000"))
-        summaries: List[str] = []
-        chunks = _chunk_messages(old, chunk_budget)
-        offset = 0
-        for n, chunk in enumerate(chunks, start=1):
-            transcript = "\n\n".join(
-                _message_for_compaction(msg, offset + i)
-                for i, msg in enumerate(chunk)
-            )
-            offset += len(chunk)
-            summaries.append(self._compact_text(
-                f"Compact transcript chunk {n}/{len(chunks)}.\n\n{transcript}"
-            ))
-
-        if len(summaries) == 1:
-            compacted = summaries[0]
-        else:
-            joined = "\n\n---\n\n".join(
-                f"# Chunk summary {i}\n\n{summary}"
-                for i, summary in enumerate(summaries, start=1)
-            )
-            compacted = self._compact_text(
-                "Merge these chunk summaries into one coherent compacted state. "
-                "Remove duplication, preserve uncertainty and provenance.\n\n"
-                + joined
-            )
-
-        stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
-        note = (
-            f"[Klimt compacted prior context at {stamp}.]\n\n"
-            "The raw transcript before this message was replaced by the "
-            "structured state below. Treat it as context, not as a new user task.\n\n"
-            f"{compacted.strip()}"
+        result = compaction_mod.compact_history(
+            history=self.history,
+            compact_text=self._compact_text,
+            keep_recent=keep_recent,
         )
-        self.history = [{"role": "user", "content": note}, *recent]
+        if result.history is self.history or result.summary == "nothing to compact":
+            return result.summary
+        self.history = result.history
         self.persist()
-        return f"compacted {len(old)} messages into {len(note)} chars; kept {len(recent)} recent messages"
+        return result.summary
 
     def _compact_text(self, text: str) -> str:
         response = self._provider.complete(
             messages=[
-                {"role": "system", "content": COMPACTION_PROMPT},
+                {"role": "system", "content": compaction_mod.COMPACTION_PROMPT},
                 {"role": "user", "content": text},
             ],
             max_completion_tokens=self.max_tokens,

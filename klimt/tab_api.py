@@ -19,7 +19,7 @@ import webbrowser
 from urllib.parse import urlparse
 from typing import Any
 
-from . import __version__, command_handlers, commands, completion, skills, themes, tools
+from . import __version__, command_handlers, commands, completion, compaction, skills, themes, tools
 from .api import ChatSession
 from .model_config import list_model_names
 from .session_factory import new_session
@@ -63,7 +63,7 @@ class _SingleTabApi:
             role = msg.get("role")
             if role == "user":
                 content = msg.get("content") or ""
-                replay_role = "system" if content.startswith("[Klimt compacted prior context") else "user"
+                replay_role = "system" if content.startswith(compaction.COMPACTED_NOTE_PREFIX) else "user"
                 self._emit({"type": "message", "role": replay_role, "content": content})
             elif role == "assistant":
                 reasoning = msg.get("reasoning")
