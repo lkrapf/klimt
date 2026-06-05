@@ -91,7 +91,9 @@ function interruptWork(klimt) {
   clearQueued(tab);
   tab.suppressUntilDone = true;
   finishWork(klimt, tab);
-  addMessage("system", "_interrupted_ queued messages cleared_");
+  // Partial assistant output and any completed tool calls from this turn are
+  // preserved in history by the backend (see runner._build_assistant_entry).
+  addMessage("system", "_interrupted \u2014 queued messages cleared_");
 
   window.pywebview.api.interrupt(tab.id).catch((e) => {
     useTranscript(tab.id);

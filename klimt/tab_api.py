@@ -28,6 +28,13 @@ from .session_factory import new_session
 class _SingleTabApi:
     """One independent chat tab. Exposed through the multi-tab Api below."""
 
+    # How long interrupt() waits for the in-flight worker to flush partial
+    # state into history before falling back to the pre-turn snapshot. The
+    # runner's cancel path is bounded by the slowest in-flight tool call;
+    # 5s covers any sane tool (network is the worst case). On timeout we
+    # still recover safely — we just lose the partial assistant message.
+    _INTERRUPT_DRAIN_SECONDS = 5.0
+
     def __init__(self, session: ChatSession, tab_id: str, emit, get_theme=None, set_theme=None) -> None:
         self._session = session
         self._tab_id = tab_id
@@ -39,6 +46,7 @@ class _SingleTabApi:
         self._busy_lock = threading.Lock()
         self._generation = 0
         self._active_base: int | None = None
+        self._worker: threading.Thread | None = None
 
     def _emit(self, event: dict) -> None:
         self._emit_to_window(self._tab_id, event)
@@ -134,7 +142,13 @@ class _SingleTabApi:
                 self._active_base = len(session.history)
 
             background = True
-            threading.Thread(target=self._stream_worker, args=(session, text, generation), daemon=True).start()
+            worker = threading.Thread(
+                target=self._stream_worker,
+                args=(session, text, generation),
+                daemon=True,
+            )
+            self._worker = worker
+            worker.start()
             return {"ok": True}
         except Exception as e:  # noqa: BLE001
             msg = f"{type(e).__name__}: {e}"
@@ -190,6 +204,7 @@ class _SingleTabApi:
             was_busy = self._busy
             old_session = self._session
             base = self._active_base
+            worker = self._worker
             if was_busy:
                 # Invalidate the active worker immediately so any late events are
                 # ignored, but keep _busy true until the replacement session is
@@ -202,16 +217,31 @@ class _SingleTabApi:
             return {"ok": True}
 
         # Python cannot safely kill a worker thread. Instead, cancel the old
-        # request, abandon that ChatSession so late persistence is ignored, and
-        # swap in a clean copy of the pre-turn session immediately.
+        # request and wait briefly for the runner to flush the in-flight
+        # iteration into history (assistant message + matching tool results,
+        # marked interrupted). Once the worker has returned, history is in a
+        # structurally valid state and we can snapshot it whole.
         old_session.abandon()
+        drained = False
+        if worker is not None and worker is not threading.current_thread():
+            worker.join(timeout=self._INTERRUPT_DRAIN_SECONDS)
+            drained = not worker.is_alive()
+
         restored = new_session(old_session.cwd)
         restored.model = old_session.model
         restored.reload_client()
         restored.session_name = old_session.session_name
         restored.kept = old_session.kept
         restored.input_history = list(old_session.input_history)
-        restored.history = copy.deepcopy(old_session.history[:base]) if base is not None else []
+        if drained:
+            # Worker is done mutating history. Take everything it produced,
+            # including the interrupted assistant message and any tool stubs.
+            restored.history = copy.deepcopy(old_session.history)
+        else:
+            # Worker still running; we can't safely read its history. Fall
+            # back to the pre-turn slice so the session stays valid, at the
+            # cost of losing whatever the worker accumulated this turn.
+            restored.history = copy.deepcopy(old_session.history[:base]) if base is not None else []
         restored.persist()
 
         with self._busy_lock:
@@ -219,6 +249,7 @@ class _SingleTabApi:
             self._session_choices = []
             self._busy = False
             self._active_base = None
+            self._worker = None
 
         self._sync_input_history()
         self._done()
