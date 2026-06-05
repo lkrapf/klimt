@@ -312,7 +312,6 @@ class Api:
                 for usage, description in commands.command_rows()
             ],
             "available_tools": available_tools,
-            "tools": available_tools,
             "theme": self._get_theme(),
             "themes": themes.list_theme_names(),
             "tabs": tab_states,

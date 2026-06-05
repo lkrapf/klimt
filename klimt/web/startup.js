@@ -61,9 +61,7 @@ export function addStartup(info) {
   }
 
   lines.push("", "## Available tools");
-  const tools = Array.isArray(info.available_tools)
-    ? info.available_tools
-    : (Array.isArray(info.tools) ? info.tools : []);
+  const tools = Array.isArray(info.available_tools) ? info.available_tools : [];
   if (tools.length) {
     lines.push("", "| tool | description |", "|---|---|");
     for (const t of tools) {
