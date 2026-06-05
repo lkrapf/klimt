@@ -8,7 +8,7 @@ A subagent is a fresh model loop run on behalf of the parent. It has:
 - Its own tool allowlist (the agent's `tools` field). Mutating tools run
   sequentially; read-only tools currently run sequentially within the
   subagent too (parallelism inside subagents can come later).
-- A turn cap (`max_turns`, default 3). One turn = one assistant message
+- A turn cap (`max_turns`, default `agents.DEFAULT_MAX_TURNS`). One turn = one assistant message
   plus any tool calls it issues plus their results.
 - A sidecar Markdown transcript written under the parent session's
   `<session>.agents/` directory.

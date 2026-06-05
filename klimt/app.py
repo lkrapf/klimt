@@ -10,13 +10,12 @@ import threading
 import uuid
 import webbrowser
 from urllib.parse import urlparse
-from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 import webview
 
-from . import __version__, agents, commands, completion, prompt, skills, themes, tools
+from . import __version__, agents, commands, completion, presenters, prompt, skills, themes, tools
 from .api import ChatSession
 from .model_config import default_model_name, list_model_configs, list_model_names
 
@@ -350,56 +349,16 @@ class _SingleTabApi:
         self._emit({"type": "text", "content": commands.hotkeys_markdown()})
 
     def _skills(self) -> None:
-        items = skills.list_skills()
-        if not items:
-            self._emit({"type": "text", "content": "_no skills found under `~/.klimt/skills`_"})
-            return
-
-        self._emit({"type": "text", "content": self._format_skills_table(items)})
+        self._emit({"type": "text", "content": presenters.skills_markdown(skills.list_skills())})
 
     def _agents(self) -> None:
-        items = agents.list_agents(self._session.cwd)
-        lines = [
-            "## Available agents",
-            "",
-            "| agent | mode | tools | model | description | source |",
-            "|---|---|---|---|---|---|",
-        ]
-        for a in items:
-            tools_label = ", ".join(a.tools) if a.tools else "none"
-            desc = self._table_cell(a.description or "(no description)")
-            model_label = self._table_cell(a.model or "(inherits parent)")
-            lines.append(
-                f"| `{self._md_escape(a.name)}` | {a.mode} | {self._table_cell(tools_label)} | {model_label} | {desc} | {a.source} |"
-            )
-
         from .model_config import list_model_classes
-        classes = list_model_classes()
-        if classes:
-            lines.extend([
-                "",
-                "Model classes from `~/.klimt/models.json`: "
-                + ", ".join(f"`{self._md_escape(c)}`" for c in classes)
-                + ". Use as the `model` argument to `agent` or as the `model:` field in an agent file.",
-            ])
-        self._emit({"type": "text", "content": "\n".join(lines)})
-
-    def _format_skills_table(self, items: list[dict[str, Any]]) -> str:
-        lines = [
-            "## Available skills",
-            "",
-            "| skill | description |",
-            "|---|---|",
-        ]
-        for s in items:
-            name = self._md_escape(s.get("name") or "")
-            desc = self._table_cell(s.get("description") or "(no description)")
-            lines.append(f"| `/{name}` | {desc} |")
-        return "\n".join(lines)
+        items = agents.list_agents(self._session.cwd)
+        self._emit({"type": "text", "content": presenters.agents_markdown(items, list_model_classes())})
 
     def _cd(self, arg: str) -> None:
         if not arg:
-            self._emit({"type": "text", "content": f"cwd: `{self._md_escape(self._session.cwd)}`\n\n_usage: `/cd <path>`_"})
+            self._emit({"type": "text", "content": f"cwd: `{presenters.md_escape(self._session.cwd)}`\n\n_usage: `/cd <path>`_"})
             return
 
         wanted = Path(arg).expanduser()
@@ -408,10 +367,10 @@ class _SingleTabApi:
         try:
             resolved = wanted.resolve(strict=True)
         except FileNotFoundError:
-            self._emit({"type": "text", "content": f"_no such directory: `{self._md_escape(arg)}`_"})
+            self._emit({"type": "text", "content": f"_no such directory: `{presenters.md_escape(arg)}`_"})
             return
         if not resolved.is_dir():
-            self._emit({"type": "text", "content": f"_not a directory: `{self._md_escape(arg)}`_"})
+            self._emit({"type": "text", "content": f"_not a directory: `{presenters.md_escape(arg)}`_"})
             return
 
         self._session.cwd = str(resolved)
@@ -419,7 +378,7 @@ class _SingleTabApi:
         self._session.store = self._session.store.for_folder(self._session.cwd)
         self._session.persist()
         self._sync_input_history()
-        self._emit({"type": "text", "content": f"cwd set to `{self._md_escape(self._session.cwd)}`"})
+        self._emit({"type": "text", "content": f"cwd set to `{presenters.md_escape(self._session.cwd)}`"})
 
     def _compact(self, arg: str) -> None:
         keep_recent = 8
@@ -435,55 +394,10 @@ class _SingleTabApi:
         self._sync_input_history()
         self._emit({"type": "text", "content": result})
 
-    @staticmethod
-    def _table_cell(text: object) -> str:
-        """Minimal escaping for a plain (non-code-span) Markdown table cell."""
-        return str(text or "").replace("|", "\\|")
-
-    @staticmethod
-    def _md_escape(text: object) -> str:
-        """Escaping for values embedded in backtick code spans or inline code."""
-        return str(text or "").replace("\\", "\\\\").replace("`", "\\`").replace("|", "\\|")
-
-    @staticmethod
-    def _format_session_time(ts: object) -> str:
-        try:
-            value = float(ts or 0)
-        except (TypeError, ValueError):
-            value = 0
-        if value <= 0:
-            return "unknown"
-        return datetime.fromtimestamp(value).strftime("%Y-%m-%d %H:%M")
-
     def _list_sessions(self) -> None:
         sessions = self._session.list_sessions()
         self._session_choices = sessions
-        if not sessions:
-            self._emit({"type": "text", "content": "_no saved sessions for this folder_"})
-            return
-
-        lines = [
-            "## Sessions",
-            "",
-            "| # | name | model | updated | messages | inputs |",
-            "|---:|---|---|---:|---:|---:|",
-        ]
-        for i, s in enumerate(sessions, start=1):
-            name = self._table_cell(s.get("name") or "")
-            model = self._table_cell(s.get("model") or "")
-            updated = self._format_session_time(s.get("updated"))
-            messages = int(s.get("messages") or 0)
-            inputs = int(s.get("inputs") or 0)
-            lines.append(f"| {i} | {name} | {model} | {updated} | {messages} | {inputs} |")
-        lines.extend([
-            "",
-            "Commands:",
-            "",
-            "- `/sessions resume <number|name>` — resume a session from this list, or by name.",
-            "- `/sessions delete <number|name>` — delete a saved session. Deleting the active session starts a new one.",
-            "- `/sessions clear confirm` — delete all saved sessions for this folder and start a new one.",
-        ])
-        self._emit({"type": "text", "content": "\n".join(lines)})
+        self._emit({"type": "text", "content": presenters.sessions_markdown(sessions)})
 
     def _resolve_session_name(self, arg: str) -> str:
         """Resolve a session name or index from the latest `/sessions` list."""
@@ -512,7 +426,7 @@ class _SingleTabApi:
         self._session_choices = []
         self._emit({"type": "clear"})
         self._sync_input_history()
-        self._emit({"type": "text", "content": f"new session **{self._md_escape(self._session.session_name)}**"})
+        self._emit({"type": "text", "content": f"new session **{presenters.md_escape(self._session.session_name)}**"})
 
     def _sessions(self, arg: str) -> None:
         if not arg:
@@ -535,7 +449,7 @@ class _SingleTabApi:
     def _delete_session(self, target: str) -> None:
         name = self._resolve_session_name(target)
         if not self._session.store.exists(name):
-            self._emit({"type": "text", "content": f"_unknown session: `{self._md_escape(target)}`_"})
+            self._emit({"type": "text", "content": f"_unknown session: `{presenters.md_escape(target)}`_"})
             return
 
         active = name == self._session.session_name
@@ -543,10 +457,10 @@ class _SingleTabApi:
         self._session_choices = []
         if active:
             self._new()
-            self._emit({"type": "text", "content": f"deleted active session **{self._md_escape(name)}**"})
+            self._emit({"type": "text", "content": f"deleted active session **{presenters.md_escape(name)}**"})
             return
 
-        self._emit({"type": "text", "content": f"deleted session **{self._md_escape(name)}**"})
+        self._emit({"type": "text", "content": f"deleted session **{presenters.md_escape(name)}**"})
         self._list_sessions()
 
     def _clear_sessions(self) -> None:
@@ -559,7 +473,7 @@ class _SingleTabApi:
         self._emit({"type": "clear"})
         self._sync_input_history()
         self._emit({"type": "text", "content": "deleted all sessions for this folder"})
-        self._emit({"type": "text", "content": f"new session **{self._md_escape(self._session.session_name)}**"})
+        self._emit({"type": "text", "content": f"new session **{presenters.md_escape(self._session.session_name)}**"})
 
     def _resume_session(self, name: str, usage: str) -> None:
         if not name:
@@ -574,14 +488,14 @@ class _SingleTabApi:
                 hint = "\n\nRun `/sessions` to refresh the numbered list."
             self._emit({
                 "type": "text",
-                "content": f"_unknown session: `{self._md_escape(requested)}`_{hint}",
+                "content": f"_unknown session: `{presenters.md_escape(requested)}`_{hint}",
             })
             return
 
         self._session_choices = []
         self._replay_session()
         self._sync_input_history()
-        self._emit({"type": "text", "content": f"resumed session **{self._md_escape(self._session.session_name)}**"})
+        self._emit({"type": "text", "content": f"resumed session **{presenters.md_escape(self._session.session_name)}**"})
 
     def _save(self, name: str) -> None:
         already_kept = self._session.kept
@@ -589,75 +503,42 @@ class _SingleTabApi:
         self._sync_input_history()
         if already_kept and not name:
             state = "saved" if self._session.kept else "not saved (in memory only)"
-            self._emit({"type": "text", "content": f"session **{self._md_escape(self._session.session_name)}** — {state}\n\n_usage: `/save <name>` to rename_"})
+            self._emit({"type": "text", "content": f"session **{presenters.md_escape(self._session.session_name)}** — {state}\n\n_usage: `/save <name>` to rename_"})
             return
-        self._emit({"type": "text", "content": f"saved session **{self._md_escape(self._session.session_name)}**"})
+        self._emit({"type": "text", "content": f"saved session **{presenters.md_escape(self._session.session_name)}**"})
 
     def _theme(self, theme: str) -> None:
         choices = themes.list_theme_names()
         current = self._get_theme()
         if not theme:
-            if not choices:
-                self._emit({"type": "text", "content": "_no themes found under `klimt/web/themes`_"})
-                return
-            rows = [
-                "## Themes",
-                "",
-                "| name | current |",
-                "|---|---|",
-            ]
-            for name in choices:
-                rows.append(f"| `{self._table_cell(name)}` | {'yes' if name == current else ''} |")
-            rows.extend(["", "_usage: `/theme <name>`; use Tab to complete names._"])
-            self._emit({"type": "text", "content": "\n".join(rows)})
+            self._emit({"type": "text", "content": presenters.themes_markdown(choices, current)})
             return
 
         requested = theme.strip()
         if requested not in choices:
-            self._emit({
-                "type": "text",
-                "content": (
-                    f"_unknown theme: `{self._md_escape(requested)}`_\n\n"
-                    "Available choices: "
-                    + (", ".join(f"`{self._md_escape(x)}`" for x in choices) if choices else "_none_")
-                ),
-            })
+            self._emit({"type": "text", "content": presenters.unknown_choice_markdown("theme", requested, choices)})
             return
 
         self._set_theme(requested)
         self._emit({"type": "theme", "name": requested})
-        self._emit({"type": "text", "content": f"theme set to **{self._md_escape(requested)}**"})
+        self._emit({"type": "text", "content": f"theme set to **{presenters.md_escape(requested)}**"})
 
     def _model(self, model: str) -> None:
         configs = list_model_configs()
         choices = [cfg.name for cfg in configs]
         if not model:
-            if not choices:
-                self._emit({"type": "text", "content": "_no models configured; create `~/.klimt/models.json`_"})
-                return
-            rows = [
-                "## Models",
-                "",
-                "| name | provider | model | current |",
-                "|---|---|---|---|",
-            ]
-            for cfg in configs:
-                current = "yes" if cfg.name == self._session.model else ""
-                rows.append(
-                    f"| {self._table_cell(cfg.name)} | {self._table_cell(cfg.provider)} | {self._table_cell(cfg.provider_model())} | {current} |"
-                )
-            rows.extend(["", "_usage: `/model <name>`; use Tab to complete names._"])
-            self._emit({"type": "text", "content": "\n".join(rows)})
+            self._emit({"type": "text", "content": presenters.models_markdown(configs, self._session.model)})
             return
 
         requested = model.strip()
         if requested not in choices:
             self._emit({
                 "type": "text",
-                "content": (
-                    f"_unknown model: `{self._md_escape(requested)}`_\n\n"
-                    "Configured choices: "
-                    + (", ".join(f"`{self._md_escape(x)}`" for x in choices) if choices else "_none; create `~/.klimt/models.json`_")
+                "content": presenters.unknown_choice_markdown(
+                    "model",
+                    requested,
+                    choices,
+                    empty_hint="_none; create `~/.klimt/models.json`_",
                 ),
             })
             return
@@ -667,7 +548,7 @@ class _SingleTabApi:
         self._session.reload_client()
         self._session.persist()
         self._sync_input_history()
-        self._emit({"type": "text", "content": f"model set to **{self._md_escape(requested)}**"})
+        self._emit({"type": "text", "content": f"model set to **{presenters.md_escape(requested)}**"})
 
     def _reload(self) -> None:
         """Reload local config, prompt layers, skill/tool modules, model config, and CSS."""
