@@ -8,6 +8,8 @@ import { appendToTranscript, scrollToBottom } from "./transcript.js";
 function summarizeArgs(name, args) {
   if (name === "bash")  return "$ " + (args.command ?? "");
   if (name === "read")  return "read " + (args.path ?? "");
+  if (name === "visual") return "visual " + (args.path ?? "") +
+                              (args.note ? " (" + args.note + ")" : "");
   if (name === "write") return "write " + (args.path ?? "") +
                               " (" + (args.content?.length ?? 0) + " bytes)";
   if (name === "glob")  return "glob " + (args.pattern ?? "") +
@@ -69,10 +71,47 @@ export function startTool(name, args) {
   return { div, out };
 }
 
+function tryParseImageEnvelope(result) {
+  if (typeof result !== "string") return null;
+  const trimmed = result.trimStart();
+  if (!trimmed.startsWith("{")) return null;
+  let parsed;
+  try { parsed = JSON.parse(trimmed); }
+  catch (_) { return null; }
+  if (!parsed || parsed._klimt_image !== true) return null;
+  return parsed;
+}
+
+function renderImageEnvelope(out, env) {
+  out.textContent = "";
+  const meta = document.createElement("div");
+  meta.className = "tool-image-meta";
+  const bytes = typeof env.bytes === "number" ? env.bytes + " bytes" : "";
+  const parts = [env.path || "(image)", env.media_type || "image", bytes].filter(Boolean);
+  meta.textContent = parts.join(" \u00b7 ");
+  out.appendChild(meta);
+  const img = document.createElement("img");
+  img.className = "tool-image";
+  img.alt = env.path || "image";
+  img.src = "data:" + (env.media_type || "image/png") + ";base64," + (env.data || "");
+  out.appendChild(img);
+  if (env.note) {
+    const note = document.createElement("div");
+    note.className = "tool-image-note";
+    note.textContent = env.note;
+    out.appendChild(note);
+  }
+}
+
 export function finalizeTool(handle, result) {
   if (!handle) return null;
   handle.div.classList.remove("pending");
-  handle.out.textContent = result;
+  const envelope = tryParseImageEnvelope(result);
+  if (envelope) {
+    renderImageEnvelope(handle.out, envelope);
+  } else {
+    handle.out.textContent = result;
+  }
   scrollToBottom();
   return handle.div;
 }

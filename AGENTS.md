@@ -113,7 +113,7 @@ It handles single-line values and folded multi-line `description:`.
 
 ## Tools
 
-The model has six tools:
+The model has these tools:
 
 - `read(path, offset?, limit?)`
 - `edit(path, edits)`
@@ -121,6 +121,17 @@ The model has six tools:
 - `bash(command)`
 - `webfetch(url)`
 - `websearch(query, category='web'|'images')`
+- `visual(path, note?)` — only registered when the active model has `vision: true`.
+- `glob(pattern, path?)`
+- `grep(pattern, path?, glob?, case_insensitive?)`
+
+`visual` returns a JSON envelope (`_klimt_image: true`, base64 data, etc.).
+`providers.py` detects that envelope when assembling outbound messages and
+substitutes a real image block: an `image` part inside the `tool_result` for
+Anthropic; a follow-up synthetic `user` message with an `image_url` part for
+OpenAI chat-completions (which does not accept image content on `role: "tool"`).
+History itself stays a flat list of string-content messages, so sessions and
+compaction need no changes.
 
 Notes:
 

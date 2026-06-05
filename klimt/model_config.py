@@ -32,6 +32,7 @@ class ModelConfig:
     context_window: int = 0
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     thinking_budget_tokens: int = 0
+    vision: bool = False
     classes: tuple[str, ...] = ()
 
     def provider_model(self) -> str:
@@ -76,6 +77,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         thinking_budget_tokens = 0
 
     classes = _parse_classes(item.get("classes") or item.get("class"))
+    vision = bool(item.get("vision"))
 
     return ModelConfig(
         name=name,
@@ -87,6 +89,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         context_window=max(0, context_window),
         max_completion_tokens=max(1, max_completion_tokens),
         thinking_budget_tokens=max(0, thinking_budget_tokens),
+        vision=vision,
         classes=classes,
     )
 

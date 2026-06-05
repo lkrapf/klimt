@@ -17,3 +17,7 @@ GLOB_MAX_RESULTS = 500
 GREP_TIMEOUT = 30  # seconds
 GREP_MAX_LINES = 500
 GREP_MAX_BYTES = 200_000
+# Cap on the raw image bytes a single `visual` call will accept. Anthropic's
+# per-image limit is 5 MB; we leave headroom for the base64 expansion in the
+# outgoing payload (4/3x).
+VISUAL_MAX_BYTES = 3_750_000

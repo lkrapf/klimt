@@ -21,6 +21,7 @@ from typing import Any, Callable, Dict
 
 from .tool_impl import fs as _fs
 from .tool_impl import shell as _shell
+from .tool_impl import visual as _visual
 from .tool_impl import web as _web
 from .tool_impl.limits import (
     BASH_TIMEOUT,
@@ -30,6 +31,7 @@ from .tool_impl.limits import (
     GREP_TIMEOUT,
     READ_MAX_BYTES,
     READ_MAX_LINES,
+    VISUAL_MAX_BYTES,
     WEBFETCH_MAX_BYTES,
     WEBFETCH_MAX_LINKS,
     WEBFETCH_MAX_TEXT_CHARS,
@@ -47,6 +49,7 @@ __all__ = [
     "GREP_TIMEOUT",
     "READ_MAX_BYTES",
     "READ_MAX_LINES",
+    "VISUAL_MAX_BYTES",
     "WEBFETCH_MAX_BYTES",
     "WEBFETCH_MAX_LINKS",
     "WEBFETCH_MAX_TEXT_CHARS",
@@ -207,6 +210,28 @@ _SCHEMAS_RAW = [
     {
         "type": "function",
         "function": {
+            "name": "visual",
+            "description": (
+                "Load a local image file (PNG, JPEG, GIF, or WebP) and attach it "
+                "to the next model turn so a multimodal model can see it. Use for "
+                "screenshots, diagrams, photos, or any image the user asks you to "
+                "inspect. Returns a metadata envelope; the image itself is added "
+                "to the outgoing message automatically. Only call this on a model "
+                "with vision capability."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the image file on disk."},
+                    "note": {"type": "string", "description": "Optional short caption shown alongside the image."},
+                },
+                "required": ["path"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "glob",
             "description": f"List files matching a shell-style glob pattern. Supports `**` for recursive matches. Returns up to {GLOB_MAX_RESULTS} paths relative to the search root, sorted by most recently modified first.",
             "parameters": {
@@ -277,6 +302,10 @@ def _run_websearch(args: Dict[str, Any], cancel: Event | None, cwd: str | None) 
     return _web.websearch(args["query"], args.get("category", "web"))
 
 
+def _run_visual(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
+    return _visual.visual(args["path"], args.get("note"), cwd)
+
+
 def _run_glob(args: Dict[str, Any], cancel: Event | None, cwd: str | None) -> str:
     return _fs.glob_(args["pattern"], args.get("path"), cwd)
 
@@ -313,6 +342,7 @@ SPECS: tuple[ToolSpec, ...] = tuple(
         ("bash", _run_bash, False),
         ("webfetch", _run_webfetch, True),
         ("websearch", _run_websearch, True),
+        ("visual", _run_visual, True),
         ("glob", _run_glob, True),
         ("grep", _run_grep, True),
     )

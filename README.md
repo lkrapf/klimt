@@ -147,6 +147,10 @@ Two optional fields control output size per model endpoint:
 - **`thinking_budget_tokens`** — reasoning token budget for Anthropic extended
   thinking. Default: `0` (disabled). Accepts `thinking_budget` as an alias.
   Must be strictly less than `max_completion_tokens`.
+- **`vision`** — boolean. When `true`, Klimt exposes the `visual` tool to this
+  endpoint so the model can load local images. Default: `false`. The model must
+  actually support image inputs; setting this on a text-only endpoint just gives
+  the model a tool whose results it can't interpret.
 
 `thinking_budget_tokens` only takes effect on the native Anthropic OAuth path
 (i.e. when `api_key_env` is omitted). It is silently ignored for all other
@@ -280,6 +284,7 @@ shown separately when the provider streams them.
 | `bash` | Run a shell command with a 120s timeout. |
 | `webfetch` | Fetch and extract text from an HTTP(S) URL. |
 | `websearch` | Search Startpage and return compact results. Supports `category='web'` (default) or `category='images'`; image results include direct image URLs and thumbnail URLs. |
+| `visual` | Attach a local image (PNG, JPEG, GIF, WebP) to the next model turn. Only exposed for models with `vision: true` in `~/.klimt/models.json`. |
 | `glob` | List files matching a shell-style glob pattern, sorted by most recently modified. |
 | `grep` | Search file contents with `ag` (the_silver_searcher). Supports regex, glob filter, and case-insensitive matching. |
 

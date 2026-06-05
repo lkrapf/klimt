@@ -12,6 +12,7 @@ from openai import AzureOpenAI, OpenAI
 
 from . import anthropic_oauth
 from .model_config import ModelConfig, resolve_model_config
+from .tool_impl import visual as _visual
 
 
 ANTHROPIC_VERSION = "2023-06-01"
@@ -108,10 +109,43 @@ def _chat_completions_sanitize_messages(
     Klimt keeps provider-neutral history. Some OpenAI-compatible endpoints reject
     assistant messages with JSON null content, especially tool-call turns. Avoid
     persisting provider-specific rewrites; adapt the outbound payload instead.
+
+    Also unpacks `visual` tool envelopes: chat-completions does not accept image
+    content parts on a `role: tool` message, so the tool result is kept as a
+    short text placeholder and an extra synthetic `user` message carrying the
+    image is inserted immediately after.
     """
-    out = []
+    out: list[dict[str, Any]] = []
     for msg in messages:
-        if msg.get("role") != "assistant" or msg.get("content") is not None:
+        role = msg.get("role")
+        if role == "tool":
+            envelope = _visual.parse_envelope(msg.get("content"))
+            if envelope is not None:
+                placeholder = _visual.envelope_summary(envelope)
+                out.append({
+                    "role": "tool",
+                    "tool_call_id": msg.get("tool_call_id") or "",
+                    "content": placeholder,
+                })
+                out.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": placeholder},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": (
+                                    f"data:{envelope.get('media_type', 'image/png')};"
+                                    f"base64,{envelope.get('data', '')}"
+                                ),
+                            },
+                        },
+                    ],
+                })
+                continue
+            out.append(msg)
+            continue
+        if role != "assistant" or msg.get("content") is not None:
             out.append(msg)
             continue
         msg = dict(msg)
@@ -201,6 +235,25 @@ def _anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for msg in messages:
         role = msg.get("role")
         if role == "tool":
+            envelope = _visual.parse_envelope(msg.get("content"))
+            if envelope is not None:
+                placeholder = _visual.envelope_summary(envelope)
+                _append_anthropic_message(out, "user", [{
+                    "type": "tool_result",
+                    "tool_use_id": str(msg.get("tool_call_id") or ""),
+                    "content": [
+                        {"type": "text", "text": placeholder},
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": envelope.get("media_type", "image/png"),
+                                "data": envelope.get("data", ""),
+                            },
+                        },
+                    ],
+                }])
+                continue
             _append_anthropic_message(out, "user", [{
                 "type": "tool_result",
                 "tool_use_id": str(msg.get("tool_call_id") or ""),

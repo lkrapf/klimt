@@ -65,7 +65,7 @@ class CommandContext:
         return new_session(cwd, model=model)
 
     def build_system_prompt(self, cwd: str) -> str:
-        return build_system_prompt(cwd)
+        return build_system_prompt(cwd, self.session.model)
 
     def get_theme(self) -> str:
         return self.tab._get_theme()
@@ -230,6 +230,9 @@ def model(ctx: CommandContext, arg: str) -> None:
     ctx.session.interrupt()
     ctx.session.model = requested
     ctx.session.reload_client()
+    # Rebuild the system prompt so the runtime tool manifest matches the new
+    # model's capabilities (e.g. drops or restores the `visual` tool).
+    ctx.session.system = ctx.build_system_prompt(ctx.session.cwd)
     ctx.session.persist()
     ctx.sync()
     ctx.emit({"type": "text", "content": f"model set to **{presenters.md_escape(requested)}**"})

@@ -22,7 +22,7 @@ def test_read_only_partition_matches_mutating() -> None:
 def test_known_read_only_tools() -> None:
     # Lock in the expected classification so accidental flips fail loudly.
     assert tools.READ_ONLY_TOOLS == frozenset(
-        {"read", "glob", "grep", "webfetch", "websearch"}
+        {"read", "glob", "grep", "webfetch", "websearch", "visual"}
     )
 
 
