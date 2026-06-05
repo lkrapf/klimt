@@ -11,7 +11,7 @@ import os
 import threading
 from pathlib import Path
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 
 from . import agent_runner, agents as agents_mod, tools as tools_mod
 from . import compaction as compaction_mod
@@ -19,7 +19,7 @@ from . import context_usage as context_usage_mod
 from .api_types import Emit
 from .model_config import ModelConfig, list_model_classes, list_model_names, resolve_model_config
 from .providers import ChatProvider
-from .runner import run_turn
+from .runner import run_turn, dispatch_one as _dispatch_one_direct
 from .session_store import DEFAULT_SESSION, UNTITLED_PREFIX, SessionStore, random_session_name, title_from_prompt
 
 
@@ -174,6 +174,10 @@ class ChatSession:
         self._provider = ChatProvider(config)
 
     def _tool_schemas(self) -> list[dict[str, Any]]:
+        # Always include all tool schemas in the API call. For non-vision
+        # models, `visual` is kept in the schema so the model can call it and
+        # receive a clear error via _dispatch_one rather than hitting an
+        # "unknown tool" failure or silently never having the option.
         schemas = list(tools_mod.SCHEMAS)
         available = agents_mod.list_agents(self.cwd)
         if available:
@@ -212,6 +216,23 @@ class ChatSession:
         )
         return agent_runner.run_agent(inv)
 
+    def _make_dispatch(self) -> "Callable[[str, Dict[str, Any]], str]":
+        """Return a dispatch function that guards `visual` on non-vision models."""
+        vision = self.model_config().vision
+
+        def dispatch(name: str, args: Dict[str, Any]) -> str:
+            if name == "visual" and not vision:
+                model_name = self.model
+                return (
+                    f"error: the `visual` tool requires a vision-capable model, "
+                    f"but {model_name!r} does not support image input. "
+                    f"Switch to a vision-capable model (e.g. claude-sonnet-4-6) "
+                    f"and retry."
+                )
+            return _dispatch_one_direct(name, args, self._cancel, self.cwd, self._agent_dispatch)
+
+        return dispatch
+
     def stream(self, user_text: str, emit: Emit) -> None:
         """Push events for one user turn.
 
@@ -237,7 +258,7 @@ class ChatSession:
             emit=emit,
             cwd=self.cwd,
             tool_schemas=self._tool_schemas(),
-            agent_dispatch=self._agent_dispatch,
+            dispatch=self._make_dispatch(),
             is_read_only=self._is_read_only,
         )
         if completed:
