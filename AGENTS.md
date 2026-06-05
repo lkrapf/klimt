@@ -62,18 +62,22 @@ rAF-throttled to one per frame.
 
 ```text
 klimt/
-  KERNEL.md        # non-persona harness prompt
-  prompt.py        # prompt assembly and AGENTS.md discovery
-  app.py           # pywebview window + JS bridge
-  api.py           # ChatSession: history, persistence, compaction
-  runner.py        # streaming model/tool turn loop
-  providers.py     # provider adapter around OpenAI-compatible clients
-  model_config.py  # ~/.klimt/models.json parsing
-  commands.py      # slash/bang command metadata and helpers
-  tools.py         # tools + JSON schemas
-  skills.py        # ~/.klimt/skills discovery
-  session_store.py # per-folder session persistence
-  web/             # frontend
+  KERNEL.md            # non-persona harness prompt
+  prompt.py            # prompt assembly and AGENTS.md discovery
+  app.py               # process entrypoint: pywebview window, main()
+  tab_api.py           # _SingleTabApi + Api (JS bridge, tab lifecycle)
+  session_factory.py   # ChatSession + system-prompt builder
+  command_handlers.py  # slash-command handlers + dispatch table
+  presenters.py        # pure Markdown formatters for UI text
+  api.py               # ChatSession: history, persistence, compaction
+  runner.py            # streaming model/tool turn loop
+  providers.py         # provider adapter around OpenAI-compatible clients
+  model_config.py      # ~/.klimt/models.json parsing
+  commands.py          # slash/bang command metadata, classify, run_shell
+  tools.py             # tools + JSON schemas
+  skills.py            # ~/.klimt/skills discovery
+  session_store.py     # per-folder session persistence
+  web/                 # frontend
 ```
 
 - Python owns conversation history.

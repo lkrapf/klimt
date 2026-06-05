@@ -18,9 +18,10 @@ from typing import TYPE_CHECKING, Callable
 from . import agents, commands, presenters, prompt, skills, themes, tools
 from .api import ChatSession
 from .model_config import list_model_classes, list_model_configs
+from .session_factory import build_system_prompt, new_session
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
-    from .app import _SingleTabApi
+    from .tab_api import _SingleTabApi
 
 
 @dataclass
@@ -61,12 +62,10 @@ class CommandContext:
         self.tab._replay_session()
 
     def new_session(self, *, cwd: str | None = None, model: str | None = None) -> ChatSession:
-        from .app import _new_session
-        return _new_session(cwd, model=model)
+        return new_session(cwd, model=model)
 
     def build_system_prompt(self, cwd: str) -> str:
-        from .app import _build_system_prompt
-        return _build_system_prompt(cwd)
+        return build_system_prompt(cwd)
 
     def get_theme(self) -> str:
         return self.tab._get_theme()
