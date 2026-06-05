@@ -96,7 +96,8 @@ def test_grep_no_matches(tmp_path: Path):
 
 
 def test_grep_missing_ag(monkeypatch, tmp_path: Path):
-    monkeypatch.setattr(tools.shutil, "which", lambda _name: None)
+    from klimt.tool_impl import fs as fs_impl
+    monkeypatch.setattr(fs_impl.shutil, "which", lambda _name: None)
     out = tools.run("grep", {"pattern": "hello"}, cwd=str(tmp_path))
     assert out.startswith("error:")
     assert "ag" in out
