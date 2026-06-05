@@ -3,19 +3,17 @@ import { reloadCss, setTheme } from "./theme.js";
 import { getTab, updateTab } from "./tabs.js";
 import {
   addMessage,
-  addTool,
   addReasoning,
   appendDelta,
   appendReasoningDelta,
   clearTranscript,
   finalizeReasoning,
   finalizeStreaming,
-  finalizeTool,
   startReasoning,
   startStreaming,
-  startTool,
   useTranscript,
 } from "./transcript.js";
+import { addTool, finalizeTool, startTool } from "./tool_view.js";
 
 export function installEventHandler(klimt, finishWork, setInputHistory, submitCommand) {
   klimt.handleEvent = function(ev) {

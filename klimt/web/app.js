@@ -6,7 +6,8 @@ import { installNavGuard } from "./navguard.js";
 import { showTabStatus } from "./status.js";
 import { setTheme } from "./theme.js";
 import { activateTab, activeTab, initializeTabs, installTabs } from "./tabs.js";
-import { addStartup, useTranscript } from "./transcript.js";
+import { useTranscript } from "./transcript.js";
+import { addStartup } from "./startup.js";
 
 const klimt = {};
 window.klimt = klimt;

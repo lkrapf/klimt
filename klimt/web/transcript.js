@@ -1,3 +1,9 @@
+/* Transcript DOM ownership and message/streaming rendering.
+ *
+ * Tool boxes live in tool_view.js. Startup banner/table rendering lives in
+ * startup.js. Both import appendToTranscript/scrollToBottom from here so all
+ * DOM appends go through the active tab's transcript container.
+ */
 import { enhance, renderMarkdown } from "./render.js";
 import { transcriptFor } from "./tabs.js";
 
@@ -11,6 +17,10 @@ function transcript() {
   return transcriptFor(currentTabId);
 }
 
+export function appendToTranscript(node) {
+  transcript().appendChild(node);
+}
+
 export function scrollToBottom() {
   const el = transcript();
   el.scrollTop = el.scrollHeight;
@@ -18,77 +28,6 @@ export function scrollToBottom() {
 
 export function clearTranscript() {
   transcript().innerHTML = "";
-}
-
-function tableCell(text) {
-  return String(text ?? "").replace(/\|/g, "\\|");
-}
-
-function codeSpan(text) {
-  return "`" + String(text ?? "").replace(/\|/g, "\\|") + "`";
-}
-
-export function addBannerLogo() {
-  const div = document.createElement("div");
-  div.className = "startup-mark";
-  div.setAttribute("aria-label", "klimt");
-  div.innerHTML =
-    '<span class="logo-bracket">[</span>' +
-    '<span class="logo-core">|&lt;</span>' +
-    '<span class="logo-bracket">]</span>' +
-    ' <span class="logo-word">klimt</span>';
-  transcript().appendChild(div);
-  scrollToBottom();
-}
-
-export function addStartup(info) {
-  addBannerLogo();
-
-  const lines = [
-    `version ${info.version || "unknown"}`,
-    "",
-    "## Available skills",
-  ];
-
-  const skills = Array.isArray(info.skills) ? info.skills : [];
-  if (skills.length) {
-    lines.push("", "| skill | description |", "|---|---|");
-    for (const s of skills) {
-      const name = tableCell(s.name || "unnamed");
-      const desc = tableCell(s.description || "(no description)");
-      lines.push("| `/" + name + "` | " + desc + " |");
-    }
-  } else {
-    lines.push("", "_none_");
-  }
-
-  lines.push("", "## Commands");
-  const commands = Array.isArray(info.commands) ? info.commands : [];
-  if (commands.length) {
-    lines.push("", "| command | description |", "|---|---|");
-    for (const c of commands) {
-      const usage = codeSpan(c.usage || "");
-      const desc = tableCell(c.description || "");
-      lines.push("| " + usage + " | " + desc + " |");
-    }
-  } else {
-    lines.push("", "type `/help` for commands");
-  }
-
-  lines.push("", "## Available tools");
-  const tools = Array.isArray(info.available_tools) ? info.available_tools : (Array.isArray(info.tools) ? info.tools : []);
-  if (tools.length) {
-    lines.push("", "| tool | description |", "|---|---|");
-    for (const t of tools) {
-      const name = tableCell(t.name || "unnamed");
-      const desc = tableCell(t.description || "(no description)");
-      lines.push("| `" + name + "` | " + desc + " |");
-    }
-  } else {
-    lines.push("", "_none_");
-  }
-
-  addMessage("system", lines.join("\n"));
 }
 
 export function addMessage(role, text, { markdown = true } = {}) {
@@ -111,7 +50,7 @@ export function addMessage(role, text, { markdown = true } = {}) {
 
   div.appendChild(r);
   div.appendChild(body);
-  transcript().appendChild(div);
+  appendToTranscript(div);
   scrollToBottom();
   return div;
 }
@@ -129,88 +68,11 @@ export function addPending(label = "thinking") {
   return div;
 }
 
-function summarizeArgs(name, args) {
-  if (name === "bash")  return "$ " + (args.command ?? "");
-  if (name === "read")  return "read " + (args.path ?? "");
-  if (name === "write") return "write " + (args.path ?? "") +
-                              " (" + (args.content?.length ?? 0) + " bytes)";
-  if (name === "glob")  return "glob " + (args.pattern ?? "") +
-                              (args.path ? " in " + args.path : "");
-  if (name === "grep") {
-    const parts = ["grep " + JSON.stringify(args.pattern ?? "")];
-    if (args.path) parts.push("in " + args.path);
-    if (args.glob) parts.push("glob=" + args.glob);
-    if (args.case_insensitive) parts.push("-i");
-    return parts.join(" ");
-  }
-  if (name === "agent") {
-    const head = "agent " + (args.name ?? "");
-    const prompt = (args.prompt ?? "").replace(/\s+/g, " ").trim();
-    return prompt ? head + ": " + (prompt.length > 80 ? prompt.slice(0, 80) + "\u2026" : prompt) : head;
-  }
-  try { return JSON.stringify(args); } catch (_) { return String(args); }
-}
-
 export function addReasoning(text, { done = true } = {}) {
   const h = startReasoning();
   appendReasoningDelta(h, text);
   if (done) finalizeReasoning(h);
   return h.div;
-}
-
-export function startTool(name, args) {
-  const div = document.createElement("div");
-  div.className = "msg tool pending";
-
-  const r = document.createElement("div");
-  r.className = "role";
-  r.textContent = "tool · " + name;
-
-  const body = document.createElement("div");
-  body.className = "body";
-
-  const call = document.createElement("pre");
-  call.className = "tool-call";
-  if (name === "bash") {
-    const code = document.createElement("code");
-    code.className = "language-bash";
-    code.textContent = args.command ?? "";
-    call.appendChild(code);
-    if (window.hljs) {
-      try { window.hljs.highlightElement(code); }
-      catch (e) { console.warn("highlight.js failed", e); }
-    }
-  } else {
-    call.textContent = summarizeArgs(name, args);
-  }
-
-  const out = document.createElement("pre");
-  out.className = "tool-out";
-  const waiting = document.createElement("span");
-  waiting.className = "thinking";
-  waiting.textContent = "running";
-  out.appendChild(waiting);
-
-  body.appendChild(call);
-  body.appendChild(out);
-  div.appendChild(r);
-  div.appendChild(body);
-  transcript().appendChild(div);
-  scrollToBottom();
-  return { div, out };
-}
-
-export function finalizeTool(handle, result) {
-  if (!handle) return null;
-  handle.div.classList.remove("pending");
-  handle.out.textContent = result;
-  scrollToBottom();
-  return handle.div;
-}
-
-export function addTool(name, args, result) {
-  const handle = startTool(name, args);
-  return finalizeTool(handle, result);
 }
 
 export function startReasoning() {
@@ -226,7 +88,7 @@ export function startReasoning() {
 
   div.appendChild(r);
   div.appendChild(body);
-  transcript().appendChild(div);
+  appendToTranscript(div);
   scrollToBottom();
   return {
     div,
@@ -277,7 +139,7 @@ export function startStreaming() {
 
   div.appendChild(r);
   div.appendChild(body);
-  transcript().appendChild(div);
+  appendToTranscript(div);
   scrollToBottom();
   return {
     div,
@@ -315,3 +177,4 @@ export function finalizeStreaming(h) {
   h.div.classList.remove("streaming");
   scrollToBottom();
 }
+
