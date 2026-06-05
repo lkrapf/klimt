@@ -1,14 +1,13 @@
 """Streaming model/tool turn runner."""
 from __future__ import annotations
 
-import json
 import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List
 
-from . import tools
+from . import tool_runner, tools
 from .api_types import Emit
 from .providers import ChatProvider
+from .tool_runner import ToolCall, parse_args
 
 AgentDispatch = Callable[[str, Dict[str, Any]], str]
 ReadOnlyPredicate = Callable[[str, Dict[str, Any]], bool]
@@ -16,14 +15,8 @@ ReadOnlyPredicate = Callable[[str, Dict[str, Any]], bool]
 
 _NORMAL_FINISH_REASONS = {"stop", "tool_calls", "end_turn", "tool_use", "stop_sequence"}
 
-# Tools that have no side effects and can be safely parallelized within a
-# barrier group. Anything not in this set forces a sequential barrier.
-# Sourced from tools.SPECS so this stays in sync as tools are added/removed.
+# Re-exported for callers (tests, api.py) that classify tool calls.
 READ_ONLY_TOOLS = tools.READ_ONLY_TOOLS
-
-# Cap parallel read-only tool execution. The bottleneck is usually the network
-# (webfetch/websearch); the threads themselves are cheap.
-_MAX_PARALLEL_TOOLS = 8
 
 
 def run_turn(
@@ -180,20 +173,39 @@ def run_turn(
             return True
 
         ordered = [v for _, v in sorted(tool_calls.items())]
-        parsed = [(_parse_args(v["args"]), v) for v in ordered]
+        parsed: list[tuple[Dict[str, Any], ToolCall]] = [
+            (parse_args(v["args"]), ToolCall.from_dict(v)) for v in ordered
+        ]
 
         # Show every pending tool box in declaration order before doing any work.
-        for args, v in parsed:
+        for args, call in parsed:
             emit({
                 "type": "tool_start",
-                "id": v["id"],
-                "name": v["name"],
+                "id": call.id,
+                "name": call.name,
                 "args": args,
             })
 
-        results: Dict[str, str] = {}
-        predicate = is_read_only or _default_is_read_only
-        if not _execute_tool_calls(parsed, results, emit, cancel, cwd, agent_dispatch, predicate):
+        def dispatch(name: str, args: Dict[str, Any]) -> str:
+            return _dispatch_one(name, args, cancel, cwd, agent_dispatch)
+
+        def on_complete(call: ToolCall, args: Dict[str, Any], result: str) -> None:
+            emit({
+                "type": "tool",
+                "id": call.id,
+                "name": call.name,
+                "args": args,
+                "result": result,
+            })
+
+        results, completed = tool_runner.execute(
+            parsed,
+            dispatch=dispatch,
+            cancel=cancel,
+            is_read_only=is_read_only,
+            on_complete=on_complete,
+        )
+        if not completed:
             emit({"type": "error", "message": "interrupted"})
             return False
 
@@ -203,44 +215,6 @@ def run_turn(
                 "tool_call_id": v["id"],
                 "content": results.get(v["id"], ""),
             })
-
-
-def _parse_args(raw: str) -> Dict[str, Any]:
-    try:
-        return json.loads(raw or "{}")
-    except json.JSONDecodeError:
-        return {"_raw": raw}
-
-
-def _execute_tool_calls(
-    parsed: list[tuple[Dict[str, Any], Dict[str, str]]],
-    results: Dict[str, str],
-    emit: Emit,
-    cancel: threading.Event,
-    cwd: str | None,
-    agent_dispatch: AgentDispatch | None,
-    is_read_only: ReadOnlyPredicate | None = None,
-) -> bool:
-    """Execute tool calls in barrier groups. Returns False if interrupted."""
-    predicate = is_read_only or _default_is_read_only
-    for group in _barrier_groups(parsed, predicate):
-        if cancel.is_set():
-            return False
-        if len(group) == 1:
-            args, v = group[0]
-            results[v["id"]] = _dispatch_one(v["name"], args, cancel, cwd, agent_dispatch)
-            emit({
-                "type": "tool",
-                "id": v["id"],
-                "name": v["name"],
-                "args": args,
-                "result": results[v["id"]],
-            })
-        else:
-            _run_parallel(group, results, emit, cancel, cwd, agent_dispatch)
-        if cancel.is_set():
-            return False
-    return True
 
 
 def _dispatch_one(
@@ -258,61 +232,6 @@ def _dispatch_one(
         except Exception as e:  # noqa: BLE001
             return f"error: {type(e).__name__}: {e}"
     return tools.run(name, args, cancel, cwd)
-
-
-def _run_parallel(
-    group: list[tuple[Dict[str, Any], Dict[str, str]]],
-    results: Dict[str, str],
-    emit: Emit,
-    cancel: threading.Event,
-    cwd: str | None,
-    agent_dispatch: AgentDispatch | None,
-) -> None:
-    """Run a read-only group on a thread pool. Emits completions as they land."""
-    workers = min(_MAX_PARALLEL_TOOLS, len(group))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        future_to_item = {
-            pool.submit(_dispatch_one, v["name"], args, cancel, cwd, agent_dispatch): (args, v)
-            for args, v in group
-        }
-        for future in as_completed(future_to_item):
-            args, v = future_to_item[future]
-            try:
-                result = future.result()
-            except Exception as e:  # noqa: BLE001 - defensive; tools.run already returns errors as strings
-                result = f"error: {type(e).__name__}: {e}"
-            results[v["id"]] = result
-            emit({
-                "type": "tool",
-                "id": v["id"],
-                "name": v["name"],
-                "args": args,
-                "result": result,
-            })
-
-
-def _default_is_read_only(name: str, args: Dict[str, Any]) -> bool:  # noqa: ARG001
-    return name in READ_ONLY_TOOLS
-
-
-def _barrier_groups(
-    parsed: list[tuple[Dict[str, Any], Dict[str, str]]],
-    is_read_only: ReadOnlyPredicate = _default_is_read_only,
-) -> list[list[tuple[Dict[str, Any], Dict[str, str]]]]:
-    """Group consecutive read-only tool calls; mutating calls form solo barriers."""
-    groups: list[list[tuple[Dict[str, Any], Dict[str, str]]]] = []
-    current: list[tuple[Dict[str, Any], Dict[str, str]]] = []
-    for args, v in parsed:
-        if is_read_only(v["name"], args):
-            current.append((args, v))
-            continue
-        if current:
-            groups.append(current)
-            current = []
-        groups.append([(args, v)])
-    if current:
-        groups.append(current)
-    return groups
 
 
 def _message_for_provider(msg: dict[str, Any], provider: ChatProvider) -> dict[str, Any]:

@@ -329,14 +329,17 @@ def test_run_agent_cancelled_before_start(tmp_path, monkeypatch):
 
 
 def test_subagent_barrier_groups():
-    calls = [
-        {"id": "1", "name": "read", "args": "{}"},
-        {"id": "2", "name": "write", "args": "{}"},
-        {"id": "3", "name": "grep", "args": "{}"},
-        {"id": "4", "name": "glob", "args": "{}"},
+    """Subagent loop shares tool_runner.barrier_groups with the parent."""
+    from klimt.tool_runner import ToolCall, barrier_groups
+
+    parsed = [
+        ({}, ToolCall(id="1", name="read")),
+        ({}, ToolCall(id="2", name="write")),
+        ({}, ToolCall(id="3", name="grep")),
+        ({}, ToolCall(id="4", name="glob")),
     ]
-    groups = agent_runner._barrier_groups(calls)
-    assert [[c["name"] for c in g] for g in groups] == [
+    groups = barrier_groups(parsed)
+    assert [[c.name for _, c in g] for g in groups] == [
         ["read"],
         ["write"],
         ["grep", "glob"],
@@ -344,5 +347,5 @@ def test_subagent_barrier_groups():
 
 
 def test_subagent_parses_bad_json():
-    assert agent_runner._parse_args("not json") == {"_raw": "not json"}
-    assert agent_runner._parse_args("") == {}
+    assert agent_runner.parse_args("not json") == {"_raw": "not json"}
+    assert agent_runner.parse_args("") == {}

@@ -18,11 +18,9 @@ delegation: `agent` is never present in a subagent's tool allowlist.
 """
 from __future__ import annotations
 
-import json
 import secrets
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List
@@ -30,9 +28,11 @@ from typing import Any, Dict, List
 from . import agents as agents_mod
 from . import prompt as prompt_mod
 from . import skills as skills_mod
+from . import tool_runner
 from . import tools as tools_mod
 from .model_config import resolve_model_config
 from .providers import ChatProvider
+from .tool_runner import ToolCall, parse_args
 
 
 # Result statuses surfaced in the tool result metadata.
@@ -49,10 +49,7 @@ _SYNTHESIS_NUDGE = (
     "missing."
 )
 
-# Same parallel ceiling as the parent runner for read-only barrier groups.
-_MAX_PARALLEL_TOOLS = 8
 
-_READ_ONLY_TOOLS = tools_mod.READ_ONLY_TOOLS
 
 
 @dataclass
@@ -400,54 +397,20 @@ def _execute_subagent_tools(
     cwd: str,
 ) -> dict[str, str]:
     """Execute tool calls in barrier groups, same policy as the parent runner."""
-    results: dict[str, str] = {}
-    groups = _barrier_groups(tool_calls)
-    for group in groups:
-        if cancel.is_set():
-            for tc in group:
-                results.setdefault(tc["id"], "[interrupted]")
-            continue
-        if len(group) == 1:
-            tc = group[0]
-            args = _parse_args(tc["args"])
-            results[tc["id"]] = tools_mod.run(tc["name"], args, cancel, cwd)
-        else:
-            workers = min(_MAX_PARALLEL_TOOLS, len(group))
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {
-                    pool.submit(tools_mod.run, tc["name"], _parse_args(tc["args"]), cancel, cwd): tc
-                    for tc in group
-                }
-                for fut in as_completed(futures):
-                    tc = futures[fut]
-                    try:
-                        results[tc["id"]] = fut.result()
-                    except Exception as e:  # noqa: BLE001
-                        results[tc["id"]] = f"error: {type(e).__name__}: {e}"
+    parsed = [
+        (parse_args(tc["args"]), ToolCall.from_dict(tc))
+        for tc in tool_calls
+    ]
+
+    def dispatch(name: str, args: Dict[str, Any]) -> str:
+        return tools_mod.run(name, args, cancel, cwd)
+
+    results, _completed = tool_runner.execute(
+        parsed,
+        dispatch=dispatch,
+        cancel=cancel,
+    )
     return results
-
-
-def _barrier_groups(tool_calls: list[dict[str, Any]]) -> list[list[dict[str, Any]]]:
-    groups: list[list[dict[str, Any]]] = []
-    current: list[dict[str, Any]] = []
-    for tc in tool_calls:
-        if tc["name"] in _READ_ONLY_TOOLS:
-            current.append(tc)
-            continue
-        if current:
-            groups.append(current)
-            current = []
-        groups.append([tc])
-    if current:
-        groups.append(current)
-    return groups
-
-
-def _parse_args(raw: str) -> dict[str, Any]:
-    try:
-        return json.loads(raw or "{}")
-    except json.JSONDecodeError:
-        return {"_raw": raw}
 
 
 def _msg_for_provider(msg: dict[str, Any], provider: ChatProvider) -> dict[str, Any]:
