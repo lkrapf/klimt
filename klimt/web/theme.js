@@ -1,6 +1,6 @@
 const THEME_LINK_ID = "theme-css";
 const THEME_STYLE_ID = "theme-css-user";
-const DEFAULT_THEME = "editorial";
+const DEFAULT_THEME = "editorial-dark";
 const THEME_NAME_RE = /^[A-Za-z0-9_-]+$/;
 
 // Names of themes that live in ~/.klimt/themes/ and must be served via bridge.

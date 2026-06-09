@@ -18,7 +18,7 @@ WEB_DIR = Path(__file__).parent / "web"
 BUNDLED_THEMES_DIR = WEB_DIR / "themes"
 USER_THEMES_DIR = Path.home() / ".klimt" / "themes"
 STATE_PATH = Path.home() / ".klimt" / "theme"
-DEFAULT_THEME = "editorial"
+DEFAULT_THEME = "editorial-dark"
 _THEME_NAME_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 
 
