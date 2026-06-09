@@ -122,7 +122,7 @@ def models_markdown(configs: list[ModelConfig], current: str) -> str:
 
 def themes_markdown(themes: list[str], current: str) -> str:
     if not themes:
-        return "_no themes found under `klimt/web/themes`_"
+        return "_no themes found under `klimt/web/themes/` or `~/.klimt/themes/`_"
 
     lines = [
         "## Themes",
