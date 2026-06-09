@@ -345,6 +345,7 @@ class Api:
             "available_tools": available_tools,
             "theme": self._get_theme(),
             "themes": themes.list_theme_names(),
+            "user_themes": [n for n in themes.list_theme_names() if themes.is_user_theme(n)],
             "tabs": tab_states,
             "active_tab": self._first_tab_id,
         }
@@ -388,6 +389,25 @@ class Api:
                 "tabs": [tab.state() for tab in self._tabs.values()],
                 "active_tab": self._first_tab_id,
             }
+
+    def get_theme_css(self, name: str) -> dict:
+        """Return the CSS text for a user theme (those outside the package tree).
+
+        Bundled themes are served as static files; this bridge method exists
+        solely for themes installed in ~/.klimt/themes/ which pywebview cannot
+        serve directly. JS calls this when is_user_theme is true.
+        """
+        path = themes.theme_path(name)
+        if path is None:
+            return {"ok": False, "error": f"unknown theme: {name}"}
+        if not themes.is_user_theme(name):
+            # Bundled theme — JS should load it as a <link>, not via bridge.
+            return {"ok": False, "error": "not a user theme"}
+        try:
+            css = path.read_text(encoding="utf-8")
+        except OSError as e:
+            return {"ok": False, "error": str(e)}
+        return {"ok": True, "css": css}
 
     def open_url(self, url: str) -> dict:
         """Open a URL in the user's default browser, never in the Klimt window.
