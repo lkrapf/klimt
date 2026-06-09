@@ -1,0 +1,320 @@
+/* C64 Pro Mono — the authentic C64 character ROM as a TrueType, served by style64.org */
+@font-face {
+  font-family: 'C64 Pro Mono';
+  src: url('https://style64.org/sites/style64.org/themes/the_suit_2/font/C64_Pro_Mono-STYLE.woff2') format('woff2'),
+       url('https://style64.org/sites/style64.org/themes/the_suit_2/font/C64_Pro_Mono-STYLE.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+}
+@font-face {
+  font-family: 'C64 Pro';
+  src: url('https://style64.org/sites/style64.org/themes/the_suit_2/font/C64_Pro-STYLE.woff2') format('woff2'),
+       url('https://style64.org/sites/style64.org/themes/the_suit_2/font/C64_Pro-STYLE.woff') format('woff');
+  font-weight: normal;
+  font-style: normal;
+}
+
+/* c64 — Commodore 64 home screen.
+   Strict VIC-II palette: every colour is one of the 16 official C64 values.
+   All structural chrome lives in app.css.  This file is palette + decoration only.
+
+   C64 palette used here (from c64-wiki.com):
+     #000000  black (0)        #ffffff  white (1)
+     #0000aa  blue (6)         #0088ff  light blue (14)
+     #aaffee  cyan (3)         #777777  grey (12)
+     #ff7777  light red (10)   #eeee77  yellow (7)
+
+   Layering map:
+     body::before  (z 10, in app.css)  → scanlines + static border frame
+     body::after   (z 11, here)        → CRT scan sweep + phosphor flicker
+
+   Border: box-shadow inset on body::before (static, never animates).
+   body padding keeps content inside it. */
+
+:root {
+  --bg:     #0000aa;          /* blue (6)        — C64 screen background    */
+  --fg:     #0088ff;          /* light blue (14)  — C64 default text colour  */
+  --dim:    #777777;          /* grey (12)        — secondary / muted text   */
+  --hot:    #ffffff;          /* white (1)        — bright / selected        */
+  --border: #0088ff;          /* light blue (14)  — matches text, authentic C64 border */
+  --mono:   "C64 Pro Mono", "C64 Pro", "IBM Plex Mono", ui-monospace, monospace;
+  /* glow derived from light blue (14) */
+  --glow:   0 0 1px rgba(0,136,255,0.6), 0 0 6px rgba(0,136,255,0.3), 0 0 14px rgba(0,136,255,0.12);
+}
+
+/* Force all text uppercase — C64 BASIC was shouting by default.
+   Press Start 2P is a pixel font; 12px is its natural grid size. */
+html, body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 12px/1.8 var(--mono);
+  text-shadow: var(--glow);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+/* Pad body so content sits inside the 20px fake border on all sides */
+body {
+  padding: 20px;
+}
+
+/* Static overlay: subtle scanlines + the iconic C64 border frame.
+   Kept on ::before (z-index 10, not animated) so the frame never moves. */
+body::before {
+  box-shadow: inset 0 0 0 20px var(--border);
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      rgba(0,0,0,0)    0,
+      rgba(0,0,0,0)    2px,
+      rgba(0,0,0,0.22) 3px,
+      rgba(0,0,0,0.22) 4px
+    ),
+    radial-gradient(
+      ellipse at center,
+      rgba(0,0,0,0)    50%,
+      rgba(0,0,0,0.25) 85%,
+      rgba(0,0,0,0.45) 100%
+    );
+}
+
+/* Animated overlay: phosphor flicker only.
+   The border frame is on body::before (static layer) so it never scrolls or animates. */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 11;
+  background: linear-gradient(
+    to bottom,
+    rgba(160,160,255,0)    0%,
+    rgba(160,160,255,0.04) 48%,
+    rgba(160,160,255,0.07) 50%,
+    rgba(160,160,255,0.04) 52%,
+    rgba(160,160,255,0)    100%
+  );
+  animation: c64-scan 9s linear infinite, c64-flicker 3.7s steps(50) infinite;
+}
+
+
+@keyframes c64-scan {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+@keyframes c64-flicker {
+  0%,  100% { opacity: 0.93; }
+  12%       { opacity: 0.97; }
+  27%       { opacity: 0.89; }
+  45%       { opacity: 0.96; }
+  61%       { opacity: 0.91; }
+  83%       { opacity: 0.95; }
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border: 2px solid var(--bg);
+  border-radius: 0;          /* no rounded corners on the C64 */
+}
+::-webkit-scrollbar-thumb:hover { background: var(--dim); }
+
+/* Chrome areas: same dark blue, border-colored rules.
+   No extra padding needed — body padding handles the frame clearance. */
+#topbar,
+#composer,
+#active-status {
+  background: var(--bg);
+  text-transform: uppercase;
+}
+#topbar        { border-bottom: 2px solid var(--border); }
+#composer      { border-top:    2px solid var(--border); }
+#active-status { border-top:    2px solid var(--border); }
+
+#title,
+.logo-core,
+.logo-word,
+.status {
+  color: var(--hot);
+  text-shadow: var(--glow);
+}
+
+.logo-bracket,
+.muted,
+.thinking {
+  color: var(--dim);
+}
+
+.msg .role {
+  color: var(--dim);
+  font-size: 11px;
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+
+/* PETSCII-flavored role sigils */
+.msg.user      .role::before { content: "> "; color: var(--hot); }
+.msg.assistant .role::before { content: "* "; color: var(--fg); }
+.msg.tool      .role::before { content: "$ "; color: var(--fg); }
+.msg.reasoning .role::before { content: "? "; color: var(--dim); }
+.msg.error     .role::before { content: "! "; color: #ff7777; } /* light red (10) */
+.msg.error,
+.msg.error .role { color: #ff7777; }                              /* light red (10) */
+
+/* Tabs and input: square, blue-framed */
+.tab,
+#new-tab,
+#input,
+.completion-popup,
+.completion-item {
+  background: #000000;          /* black (0) */
+  color: var(--fg);
+  border: 1px solid var(--border);
+  border-radius: 0;
+  text-transform: uppercase;
+}
+
+.tab.active,
+#input:focus {
+  color: var(--hot);
+  border-color: var(--hot);
+  box-shadow: 0 0 0 1px var(--border);
+}
+
+#input {
+  caret-color: var(--hot);
+  /* blinking block cursor — because hardware */
+  caret-shape: block;
+}
+
+.tab-close:hover,
+.context.danger  { color: #ff7777; }  /* light red (10) */
+.context.warning { color: #eeee77; }  /* yellow (7)      */
+
+/* Body text: pixel font — keep at inherited 12px, generous line-height */
+.msg .body {
+  font-size: 12px;
+  line-height: 1.8;
+  text-shadow: var(--glow);
+}
+
+/* Code and tool panels: cyan accent, dark inset */
+.msg pre,
+.msg code,
+.msg .tool-call,
+.msg .tool-out,
+.msg.reasoning .reasoning-body,
+.completion-popup,
+.completion-item,
+.msg .mermaid svg {
+  font-family: var(--mono);
+  font-size: 0.75em;
+  text-transform: uppercase;
+}
+
+.msg pre,
+.msg :not(pre) > code,
+.msg.tool .tool-call,
+.msg.tool .tool-out,
+.msg.reasoning .reasoning-body,
+.msg .mermaid {
+  background: #000000;          /* black (0) */
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--fg);
+  text-shadow: 0 0 4px rgba(170,255,238,0.35);
+}
+
+.msg.tool .tool-call           { color: var(--hot); }  /* white (1) */
+.msg.tool .tool-out            { color: var(--fg); }
+.msg.reasoning .reasoning-body { color: var(--dim); }
+.msg :not(pre) > code        { padding: 1px 4px; }
+
+/* Syntax: keep it PETSCII-spirited — few colors, punchy */
+.msg pre code.hljs { color: var(--fg); background: transparent; }
+.msg .hljs-comment,
+.msg .hljs-quote          { color: var(--dim); font-style: normal; }
+.msg .hljs-keyword,
+.msg .hljs-selector-tag,
+.msg .hljs-subst          { color: #ffffff; font-weight: 600; }
+.msg .hljs-string,
+.msg .hljs-regexp,
+.msg .hljs-symbol,
+.msg .hljs-bullet         { color: var(--fg); }
+.msg .hljs-number,
+.msg .hljs-literal,
+.msg .hljs-variable,
+.msg .hljs-template-variable,
+.msg .hljs-attribute      { color: #eeee77; }     /* yellow (7) */
+.msg .hljs-title,
+.msg .hljs-section,
+.msg .hljs-name,
+.msg .hljs-selector-id,
+.msg .hljs-selector-class { color: var(--fg); }
+.msg .hljs-type,
+.msg .hljs-built_in,
+.msg .hljs-tag            { color: var(--fg); }
+.msg .hljs-meta,
+.msg .hljs-link           { color: var(--dim); text-decoration: underline dotted; }
+
+/* Headings: white, all-caps (already inherit), border-ruled */
+.msg h1, .msg h2, .msg h3, .msg h4, .msg h5, .msg h6 {
+  color: var(--hot);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  border-bottom: none;
+  font-weight: normal;
+  text-shadow: var(--glow);
+}
+.msg h1 { font-size: 1.4em;  border-bottom: 2px solid var(--border); padding-bottom: 4px; }
+.msg h2 { font-size: 1.2em;  border-bottom: 1px solid var(--border); padding-bottom: 3px; }
+.msg h3 { font-size: 1.05em; color: var(--fg); }
+.msg h4 { font-size: 1.0em;  color: var(--fg); }
+
+.msg strong { color: var(--hot); font-weight: normal; text-shadow: var(--glow); }
+.msg em     { color: var(--fg); font-style: normal; text-decoration: underline; }
+.msg a      { color: var(--fg); text-decoration: underline; text-underline-offset: 2px; }
+
+.msg ul > li::before { content: "* "; color: var(--hot); }
+
+.msg hr { border-top: 1px solid var(--border); }
+
+.msg blockquote {
+  border-left: 3px solid var(--border);
+  color: var(--dim);
+  padding: 2px 0 2px 12px;
+}
+
+/* Tables: bordered grid, cyan headers */
+.msg table { border-collapse: collapse; }
+.msg th, .msg td {
+  border: 1px solid var(--border);
+  padding: 4px 10px 4px 0;
+}
+.msg th {
+  color: var(--fg);
+  border-bottom: 2px solid var(--border);
+  font-weight: normal;
+}
+
+.msg img {
+  border: 2px solid var(--border);
+  background: var(--bg);
+  border-radius: 0;
+}
+
+.completion-item.active,
+.completion-item:hover {
+  color: var(--hot);
+  background: #000000;  /* black (0) */
+}
+
+.msg.streaming .body::after { color: var(--hot); }
+
+/* Block text selection: inverted, like the real thing */
+::selection { background: var(--fg); color: var(--bg); }
+
+/* No motion: keep look, kill animation */
+@media (prefers-reduced-motion: reduce) {
+  body::after { animation: none; }
+}
