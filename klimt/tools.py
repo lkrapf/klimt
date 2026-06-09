@@ -217,7 +217,8 @@ _SCHEMAS_RAW = [
                 "screenshots, diagrams, photos, or any image the user asks you to "
                 "inspect. Returns a metadata envelope; the image itself is added "
                 "to the outgoing message automatically. Only call this on a model "
-                "with vision capability."
+                "with vision capability. Only use this for files already on disk; "
+                "never download a remote image just to pass it here."
             ),
             "parameters": {
                 "type": "object",
