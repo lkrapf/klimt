@@ -50,11 +50,21 @@ def test_bedrock_request_splits_system_and_maps_tools():
     }
 
 
-def test_bedrock_request_rejects_thinking_budget():
-    cfg = ModelConfig(name="br", provider="bedrock", model="m", thinking_budget_tokens=1)
+def test_bedrock_request_thinking_budget_sets_additional_fields():
+    cfg = ModelConfig(name="br", provider="bedrock", model="m", thinking_budget_tokens=500)
+
+    request = _bedrock_request(cfg, [], [], 1000)
+
+    assert request["additionalModelRequestFields"] == {
+        "thinking": {"type": "enabled", "budget_tokens": 500}
+    }
+
+
+def test_bedrock_request_thinking_budget_must_be_less_than_max_tokens():
+    cfg = ModelConfig(name="br", provider="bedrock", model="m", thinking_budget_tokens=1000)
 
     with pytest.raises(ValueError, match="thinking_budget_tokens"):
-        _bedrock_request(cfg, [], [], 100)
+        _bedrock_request(cfg, [], [], 1000)
 
 
 def test_bedrock_messages_maps_assistant_tool_calls_and_tool_results():
@@ -94,6 +104,42 @@ def test_bedrock_messages_maps_assistant_tool_calls_and_tool_results():
     ]
 
 
+def test_bedrock_messages_roundtrips_reasoning_block():
+    messages = _bedrock_messages([
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning": "let me think",
+            "reasoning_signature": "sig123",
+            "tool_calls": [],
+        },
+    ])
+
+    assert messages == [{
+        "role": "assistant",
+        "content": [
+            {
+                "reasoningContent": {
+                    "reasoningText": {"text": "let me think", "signature": "sig123"},
+                },
+            },
+            {"text": "answer"},
+        ],
+    }]
+
+
+def test_bedrock_messages_omits_reasoning_without_signature():
+    messages = _bedrock_messages([
+        {
+            "role": "assistant",
+            "content": "answer",
+            "reasoning": "let me think",
+        },
+    ])
+
+    assert messages == [{"role": "assistant", "content": [{"text": "answer"}]}]
+
+
 def test_bedrock_tools_keeps_schema_unchanged():
     schema = {
         "type": "function",
@@ -129,6 +175,32 @@ def test_bedrock_image_block_decodes_visual_envelope():
         "format": "png",
         "source": {"bytes": raw},
     }
+
+
+def test_bedrock_stream_yields_reasoning_deltas():
+    cfg = ModelConfig(name="br", provider="bedrock", model="m")
+
+    class FakeReasoningClient:
+        def converse_stream(self, **request):
+            return {
+                "stream": iter([
+                    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": "hmm"}}}},
+                    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"text": " ok"}}}},
+                    {"contentBlockDelta": {"contentBlockIndex": 0, "delta": {"reasoningContent": {"signature": "abc"}}}},
+                    {"contentBlockDelta": {"contentBlockIndex": 1, "delta": {"text": "answer"}}},
+                    {"messageStop": {"stopReason": "end_turn"}},
+                ]),
+            }
+
+    stream = _BedrockStream(cfg, FakeReasoningClient(), [{"role": "user", "content": "q"}], [], 100)
+    chunks = list(stream)
+
+    assert chunks[0].choices[0].delta.reasoning == "hmm"
+    assert chunks[1].choices[0].delta.reasoning == " ok"
+    assert chunks[2].choices[0].delta.reasoning_signature == "abc"
+    assert chunks[3].choices[0].delta.content == "answer"
+    assert chunks[4].finish_reason == "end_turn"
+
 
 
 class FakeBedrockClient:

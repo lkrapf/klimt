@@ -65,7 +65,7 @@ class ChatProvider:
         return self.config.provider_model()
 
     def preserves_reasoning_blocks(self) -> bool:
-        return self._anthropic_oauth
+        return self._anthropic_oauth or self._bedrock
 
     def complete(self, messages: list[dict[str, Any]], max_completion_tokens: int) -> Any:
         if self._anthropic_oauth:
@@ -178,8 +178,6 @@ def _bedrock_request(
     tool_schemas: list[dict[str, Any]] | None,
     max_completion_tokens: int,
 ) -> dict[str, Any]:
-    if config.thinking_budget_tokens:
-        raise ValueError("Bedrock provider does not support thinking_budget_tokens yet")
     system, rest = _split_system(messages)
     request: dict[str, Any] = {
         "modelId": config.provider_model(),
@@ -188,6 +186,15 @@ def _bedrock_request(
     }
     if system:
         request["system"] = [{"text": system}]
+    if config.thinking_budget_tokens:
+        if config.thinking_budget_tokens >= max_completion_tokens:
+            raise ValueError("thinking_budget_tokens must be lower than max_completion_tokens")
+        request["additionalModelRequestFields"] = {
+            "thinking": {
+                "type": "enabled",
+                "budget_tokens": config.thinking_budget_tokens,
+            }
+        }
     tools = _bedrock_tools(tool_schemas or [])
     if tools:
         request["toolConfig"] = {"tools": tools}
@@ -208,6 +215,17 @@ def _bedrock_messages(messages: list[dict[str, Any]], *, vision: bool = True) ->
             }])
         elif role == "assistant":
             blocks: list[dict[str, Any]] = []
+            reasoning = msg.get("reasoning")
+            reasoning_signature = msg.get("reasoning_signature")
+            if reasoning and reasoning_signature:
+                blocks.append({
+                    "reasoningContent": {
+                        "reasoningText": {
+                            "text": str(reasoning),
+                            "signature": str(reasoning_signature),
+                        }
+                    }
+                })
             content = msg.get("content")
             if content:
                 blocks.append({"text": str(content)})
@@ -362,6 +380,7 @@ class _BedrockStream:
         self._request = _bedrock_request(config, messages, tool_schemas, max_completion_tokens)
         self._stream: Any = None
         self._tool_blocks: dict[int, dict[str, str]] = {}
+        self._reasoning_blocks: dict[int, dict[str, str]] = {}
 
     def close(self) -> None:
         close = getattr(self._stream, "close", None)
@@ -408,7 +427,18 @@ class _BedrockStream:
                 block["args"] += partial
                 yield _chunk(tool_calls=[_tool_delta(index=index, arguments=partial)])
             elif "reasoningContent" in delta:
-                raise RuntimeError("Bedrock reasoningContent is not supported yet")
+                rc = delta.get("reasoningContent") or {}
+                thinking_delta = rc.get("text")
+                signature_delta = rc.get("signature")
+                index = int(delta_event.get("contentBlockIndex") or 0)
+                if thinking_delta is not None:
+                    block = self._reasoning_blocks.setdefault(index, {"text": "", "signature": ""})
+                    block["text"] += thinking_delta
+                    yield _chunk(reasoning=thinking_delta)
+                if signature_delta is not None:
+                    block = self._reasoning_blocks.setdefault(index, {"text": "", "signature": ""})
+                    block["signature"] += signature_delta
+                    yield _chunk(reasoning_signature=signature_delta)
         elif "contentBlockStop" in event:
             index = int(event["contentBlockStop"].get("contentBlockIndex") or 0)
             if index in self._tool_blocks:
