@@ -2,8 +2,8 @@
 
 Klimt is a small local LLM harness with a native `pywebview` window, streaming
 Markdown UI, persistent sessions, prompt layering, skills, and model tool calls.
-It supports Azure OpenAI, OpenAI, OpenAI-compatible endpoints, Ollama, and
-Anthropic through Anthropic's OpenAI-compatible endpoint.
+It supports Azure OpenAI, OpenAI, OpenAI-compatible endpoints, Ollama,
+Anthropic through Anthropic's OpenAI-compatible endpoint, and AWS Bedrock.
 
 Klimt is heavily inspired by the fantastic [pi harness](https://pi.dev).
 
@@ -107,6 +107,14 @@ set, the first listed model wins.
       "context_window": 200000,
       "max_completion_tokens": 16000,
       "thinking_budget_tokens": 10000
+    },
+    {
+      "name": "bedrock-claude",
+      "provider": "bedrock",
+      "model": "anthropic.claude-sonnet-4-5",
+      "region": "us-east-1",
+      "context_window": 200000,
+      "max_completion_tokens": 16000
     }
   ]
 }
@@ -118,11 +126,17 @@ Supported `provider` values are:
 - `openai`
 - `ollama`
 - `anthropic`
+- `bedrock`
 
 Do not put secret values in `models.json`; put the environment variable name in
 `api_key_env` for API-key based providers. Authenticated providers
 (`azure` and `openai`) require it. `ollama` does not unless your
-OpenAI-compatible endpoint enforces auth.
+OpenAI-compatible endpoint enforces auth. `bedrock` does not use `api_key_env`
+either — it uses your AWS credentials from the environment (`AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`) or any credential source that
+`boto3` resolves (instance profile, SSO, `~/.aws/credentials`, etc.). Set
+`region` to specify the AWS region; if omitted, `boto3`'s default region
+resolution applies.
 
 `openai` can also point at OpenAI-compatible gateways by setting `base_url` and
 `api_key_env`. Anthropic has two modes:
