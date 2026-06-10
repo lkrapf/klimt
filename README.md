@@ -160,15 +160,38 @@ Two optional fields control output size per model endpoint:
   single response. Default: `4096`. Accepts `max_tokens` as an alias.
 - **`thinking_budget_tokens`** — reasoning token budget for Anthropic extended
   thinking. Default: `0` (disabled). Accepts `thinking_budget` as an alias.
-  Must be strictly less than `max_completion_tokens`.
+  Must be strictly less than `max_completion_tokens`. Ignored when
+  `adaptive_thinking` is `true`.
+- **`adaptive_thinking`** — boolean. When `true`, uses Bedrock's adaptive
+  thinking mode (`thinking.type: "adaptive"`) instead of the fixed-budget
+  extended thinking mode (`thinking.type: "enabled"`). Required for newer
+  Bedrock models such as Claude Opus 4.7 and later, which reject `"enabled"`
+  outright. On these models, Claude decides dynamically how much to think;
+  `thinking_budget_tokens` has no effect. Default: `false`.
 - **`vision`** — boolean. When `true`, Klimt exposes the `visual` tool to this
   endpoint so the model can load local images. Default: `false`. The model must
   actually support image inputs; setting this on a text-only endpoint just gives
   the model a tool whose results it can't interpret.
 
 `thinking_budget_tokens` only takes effect on the native Anthropic OAuth path
-(i.e. when `api_key_env` is omitted). It is silently ignored for all other
-providers and for Anthropic entries that use an API key.
+(i.e. when `api_key_env` is omitted) and on Bedrock endpoints that do not use
+`adaptive_thinking`. It is silently ignored for all other providers and for
+Anthropic entries that use an API key.
+
+Example Bedrock entry for Claude Opus 4.7 (adaptive thinking required):
+
+```json
+{
+  "name": "bedrock-claude-opus-4-7",
+  "provider": "bedrock",
+  "model": "us.anthropic.claude-opus-4-7",
+  "region": "us-west-2",
+  "context_window": 200000,
+  "max_completion_tokens": 32000,
+  "adaptive_thinking": true,
+  "vision": true
+}
+```
 
 ## Global and project instructions
 

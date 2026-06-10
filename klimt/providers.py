@@ -186,7 +186,11 @@ def _bedrock_request(
     }
     if system:
         request["system"] = [{"text": system}]
-    if config.thinking_budget_tokens:
+    if config.adaptive_thinking:
+        request["additionalModelRequestFields"] = {
+            "thinking": {"type": "adaptive"}
+        }
+    elif config.thinking_budget_tokens:
         if config.thinking_budget_tokens >= max_completion_tokens:
             raise ValueError("thinking_budget_tokens must be lower than max_completion_tokens")
         request["additionalModelRequestFields"] = {

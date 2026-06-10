@@ -33,6 +33,7 @@ class ModelConfig:
     context_window: int = 0
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     thinking_budget_tokens: int = 0
+    adaptive_thinking: bool = False
     vision: bool = False
     classes: tuple[str, ...] = ()
 
@@ -91,6 +92,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         context_window=max(0, context_window),
         max_completion_tokens=max(1, max_completion_tokens),
         thinking_budget_tokens=max(0, thinking_budget_tokens),
+        adaptive_thinking=bool(item.get("adaptive_thinking")),
         vision=vision,
         classes=classes,
     )
