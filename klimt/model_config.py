@@ -29,6 +29,7 @@ class ModelConfig:
     base_url: str = ""
     api_version: str = ""
     api_key_env: str = ""
+    region: str = ""
     context_window: int = 0
     max_completion_tokens: int = DEFAULT_MAX_COMPLETION_TOKENS
     thinking_budget_tokens: int = 0
@@ -86,6 +87,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         base_url=str(item.get("base_url") or item.get("endpoint") or "").strip(),
         api_version=str(item.get("api_version") or "").strip(),
         api_key_env=str(item.get("api_key_env") or "").strip(),
+        region=str(item.get("region") or "").strip(),
         context_window=max(0, context_window),
         max_completion_tokens=max(1, max_completion_tokens),
         thinking_budget_tokens=max(0, thinking_budget_tokens),

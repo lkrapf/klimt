@@ -9,6 +9,7 @@ description = "Small local LLM harness with a pywebview UI, streaming Markdown, 
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
+  "boto3>=1.35.0",
   "openai>=1.50.0",
   "pywebview>=5.0",
 ]

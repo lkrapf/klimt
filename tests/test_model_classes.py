@@ -44,6 +44,14 @@ def test_classes_empty_when_missing(fake_models):
     assert model_config.list_model_configs()[0].classes == ()
 
 
+def test_region_parsed(fake_models):
+    _write_models(fake_models, [
+        {"name": "bedrock", "provider": "bedrock", "model": "anthropic.claude", "region": "us-east-1"},
+    ])
+    cfg = model_config.list_model_configs()[0]
+    assert cfg.region == "us-east-1"
+
+
 def test_list_model_classes_dedupes(fake_models):
     _write_models(fake_models, [
         {"name": "a", "provider": "azure", "api_key_env": "K", "classes": ["heavy", "opus"]},

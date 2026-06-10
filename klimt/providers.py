@@ -1,6 +1,7 @@
 """Provider/client adapters for model APIs."""
 from __future__ import annotations
 
+import base64
 import json
 import os
 import urllib.error
@@ -27,7 +28,8 @@ class ChatProvider:
     def __init__(self, config: ModelConfig) -> None:
         self.config = config
         self._anthropic_oauth = config.provider == "anthropic" and not config.api_key_env
-        self._api_key = "" if self._anthropic_oauth else config.resolved_api_key()
+        self._bedrock = config.provider == "bedrock"
+        self._api_key = "" if self._anthropic_oauth or self._bedrock else config.resolved_api_key()
         self.client = None if self._anthropic_oauth else self._make_client(config, self._api_key)
 
     @classmethod
@@ -54,6 +56,9 @@ class ChatProvider:
                 api_key=api_key,
                 base_url=config.base_url or "https://api.anthropic.com/v1",
             )
+        if config.provider == "bedrock":
+            import boto3
+            return boto3.client("bedrock-runtime", region_name=config.region or None)
         raise ValueError(f"unsupported model provider: {config.provider}")
 
     def provider_model(self) -> str:
@@ -70,6 +75,8 @@ class ChatProvider:
                 messages,
                 max_completion_tokens,
             )
+        if self._bedrock:
+            return _bedrock_complete(self.config, self.client, messages, max_completion_tokens)
         return self.client.chat.completions.create(
             model=self.provider_model(),
             messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -90,6 +97,8 @@ class ChatProvider:
                 tool_schemas,
                 max_completion_tokens,
             )
+        if self._bedrock:
+            return _BedrockStream(self.config, self.client, messages, tool_schemas, max_completion_tokens)
         return self.client.chat.completions.create(
             model=self.provider_model(),
             messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -160,7 +169,269 @@ def _chat_completions_sanitize_messages(
 def _debug_provider_event(provider: str, event: dict[str, Any]) -> None:
     if not PROVIDER_DEBUG:
         return
-    print(f"[klimt:{provider}] {json.dumps(event, ensure_ascii=False)}", flush=True)
+    print(f"[klimt:{provider}] {json.dumps(event, ensure_ascii=False, default=str)}", flush=True)
+
+
+def _bedrock_request(
+    config: ModelConfig,
+    messages: list[dict[str, Any]],
+    tool_schemas: list[dict[str, Any]] | None,
+    max_completion_tokens: int,
+) -> dict[str, Any]:
+    if config.thinking_budget_tokens:
+        raise ValueError("Bedrock provider does not support thinking_budget_tokens yet")
+    system, rest = _split_system(messages)
+    request: dict[str, Any] = {
+        "modelId": config.provider_model(),
+        "messages": _bedrock_messages(rest, vision=config.vision),
+        "inferenceConfig": {"maxTokens": max_completion_tokens},
+    }
+    if system:
+        request["system"] = [{"text": system}]
+    tools = _bedrock_tools(tool_schemas or [])
+    if tools:
+        request["toolConfig"] = {"tools": tools}
+    return request
+
+
+def _bedrock_messages(messages: list[dict[str, Any]], *, vision: bool = True) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for msg in messages:
+        role = msg.get("role")
+        if role == "tool":
+            _append_bedrock_message(out, "user", [{
+                "toolResult": _bedrock_tool_result(
+                    str(msg.get("tool_call_id") or ""),
+                    msg.get("content"),
+                    vision=vision,
+                ),
+            }])
+        elif role == "assistant":
+            blocks: list[dict[str, Any]] = []
+            content = msg.get("content")
+            if content:
+                blocks.append({"text": str(content)})
+            for tc in msg.get("tool_calls") or []:
+                fn = tc.get("function") or {}
+                try:
+                    tool_input = json.loads(fn.get("arguments") or "{}")
+                except json.JSONDecodeError:
+                    tool_input = {}
+                if not isinstance(tool_input, dict):
+                    tool_input = {}
+                blocks.append({
+                    "toolUse": {
+                        "toolUseId": str(tc.get("id") or ""),
+                        "name": str(fn.get("name") or ""),
+                        "input": tool_input,
+                    },
+                })
+            _append_bedrock_message(out, "assistant", blocks or [{"text": ""}])
+        elif role == "user":
+            _append_bedrock_message(out, "user", _bedrock_user_blocks(msg.get("content")))
+    return out
+
+
+def _append_bedrock_message(out: list[dict[str, Any]], role: str, blocks: list[dict[str, Any]]) -> None:
+    if out and out[-1]["role"] == role:
+        out[-1]["content"].extend(blocks)
+        return
+    out.append({"role": role, "content": blocks})
+
+
+def _bedrock_user_blocks(content: Any) -> list[dict[str, Any]]:
+    if isinstance(content, list):
+        blocks: list[dict[str, Any]] = []
+        for part in content:
+            if isinstance(part, dict) and part.get("type") == "text":
+                blocks.append({"text": str(part.get("text") or "")})
+            else:
+                blocks.append({"text": str(part)})
+        return blocks or [{"text": ""}]
+    return [{"text": str(content or "")}]
+
+
+def _bedrock_tool_result(tool_use_id: str, content: Any, *, vision: bool) -> dict[str, Any]:
+    envelope = _visual.parse_envelope(content)
+    if envelope is None:
+        return {"toolUseId": tool_use_id, "content": [{"text": str(content or "")}]}
+    result_blocks: list[dict[str, Any]] = [{"text": _visual.envelope_summary(envelope)}]
+    image = _bedrock_image_block(envelope) if vision else None
+    if image is not None:
+        result_blocks.append({"image": image})
+    return {"toolUseId": tool_use_id, "content": result_blocks}
+
+
+def _bedrock_image_block(envelope: dict[str, Any]) -> dict[str, Any] | None:
+    media_type = str(envelope.get("media_type") or "")
+    formats = {
+        "image/png": "png",
+        "image/jpeg": "jpeg",
+        "image/gif": "gif",
+        "image/webp": "webp",
+    }
+    image_format = formats.get(media_type)
+    if not image_format:
+        return None
+    data = envelope.get("data")
+    if not isinstance(data, str):
+        return None
+    try:
+        raw = base64.b64decode(data, validate=True)
+    except Exception:
+        return None
+    return {"format": image_format, "source": {"bytes": raw}}
+
+
+def _bedrock_tools(tool_schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for schema in tool_schemas:
+        fn = schema.get("function") or {}
+        name = fn.get("name")
+        if not name:
+            continue
+        out.append({
+            "toolSpec": {
+                "name": name,
+                "description": fn.get("description") or "",
+                "inputSchema": {"json": fn.get("parameters") or {"type": "object"}},
+            },
+        })
+    return out
+
+
+def _bedrock_usage(usage: dict[str, Any]) -> Any:
+    input_tokens = int(usage.get("inputTokens") or 0)
+    output_tokens = int(usage.get("outputTokens") or 0)
+    total_tokens = int(usage.get("totalTokens") or input_tokens + output_tokens)
+    cache_read = int(usage.get("cacheReadInputTokens") or 0)
+    return SimpleNamespace(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=total_tokens,
+        prompt_tokens_details=SimpleNamespace(cached_tokens=cache_read),
+    )
+
+
+def _bedrock_error(config: ModelConfig, exc: Exception, client: Any | None = None) -> str:
+    code = type(exc).__name__
+    message = str(exc)
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        error = response.get("Error") or {}
+        code = str(error.get("Code") or code)
+        message = str(error.get("Message") or message)
+    region = config.region or str(getattr(getattr(client, "meta", None), "region_name", "") or "")
+    region_text = f", region={region}" if region else ""
+    return f"Bedrock API error {code} (model={config.provider_model()}{region_text}): {message}"
+
+
+def _bedrock_complete(
+    config: ModelConfig,
+    client: Any,
+    messages: list[dict[str, Any]],
+    max_completion_tokens: int,
+) -> Any:
+    request = _bedrock_request(config, messages, None, max_completion_tokens)
+    try:
+        data = client.converse(**request)
+    except Exception as exc:  # noqa: BLE001
+        raise RuntimeError(_bedrock_error(config, exc, client)) from exc
+    content = "".join(
+        block.get("text", "")
+        for block in ((data.get("output") or {}).get("message") or {}).get("content", [])
+        if "text" in block
+    )
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=content))],
+        usage=_bedrock_usage(data.get("usage") or {}),
+    )
+
+
+class _BedrockStream:
+    def __init__(
+        self,
+        config: ModelConfig,
+        client: Any,
+        messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]],
+        max_completion_tokens: int,
+    ) -> None:
+        self._config = config
+        self._client = client
+        self._request = _bedrock_request(config, messages, tool_schemas, max_completion_tokens)
+        self._stream: Any = None
+        self._tool_blocks: dict[int, dict[str, str]] = {}
+
+    def close(self) -> None:
+        close = getattr(self._stream, "close", None)
+        if close:
+            close()
+
+    def __iter__(self) -> Iterator[Any]:
+        try:
+            response = self._client.converse_stream(**self._request)
+            self._stream = response.get("stream")
+            if self._stream:
+                for event in self._stream:
+                    _debug_provider_event("bedrock", event)
+                    yield from self._event(event)
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(_bedrock_error(self._config, exc, self._client)) from exc
+        finally:
+            self._stream = None
+
+    def _event(self, event: dict[str, Any]) -> Iterator[Any]:
+        if "contentBlockStart" in event:
+            start_event = event["contentBlockStart"]
+            start = start_event.get("start") or {}
+            tool = start.get("toolUse") or {}
+            if tool:
+                index = int(start_event.get("contentBlockIndex") or 0)
+                tool_id = str(tool.get("toolUseId") or "")
+                name = str(tool.get("name") or "")
+                if not tool_id or not name:
+                    raise RuntimeError(f"Bedrock sent malformed toolUse block at index {index}")
+                self._tool_blocks[index] = {"id": tool_id, "name": name, "args": ""}
+                yield _chunk(tool_calls=[_tool_delta(index=index, tool_id=tool_id, name=name)])
+        elif "contentBlockDelta" in event:
+            delta_event = event["contentBlockDelta"]
+            delta = delta_event.get("delta") or {}
+            if "text" in delta:
+                yield _chunk(content=delta.get("text") or "")
+            elif "toolUse" in delta:
+                index = int(delta_event.get("contentBlockIndex") or 0)
+                partial = str((delta.get("toolUse") or {}).get("input") or "")
+                block = self._tool_blocks.get(index)
+                if block is None:
+                    raise RuntimeError(f"Bedrock sent tool input JSON for unknown content block {index}")
+                block["args"] += partial
+                yield _chunk(tool_calls=[_tool_delta(index=index, arguments=partial)])
+            elif "reasoningContent" in delta:
+                raise RuntimeError("Bedrock reasoningContent is not supported yet")
+        elif "contentBlockStop" in event:
+            index = int(event["contentBlockStop"].get("contentBlockIndex") or 0)
+            if index in self._tool_blocks:
+                self._validate_tool_block(index)
+        elif "messageStop" in event:
+            stop_reason = event["messageStop"].get("stopReason")
+            if stop_reason:
+                yield SimpleNamespace(choices=[], usage=None, finish_reason=str(stop_reason))
+        elif "metadata" in event:
+            usage = (event["metadata"] or {}).get("usage") or {}
+            if usage:
+                yield SimpleNamespace(choices=[], usage=_bedrock_usage(usage))
+
+    def _validate_tool_block(self, index: int) -> None:
+        block = self._tool_blocks[index]
+        try:
+            parsed = json.loads(block["args"] or "{}")
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Bedrock tool input JSON was incomplete for tool {block['name']}: {exc.msg}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise RuntimeError(f"Bedrock tool input for tool {block['name']} was not a JSON object")
 
 
 def _anthropic_base_url(config: ModelConfig) -> str:
