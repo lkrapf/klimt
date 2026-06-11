@@ -24,7 +24,7 @@ roadmap theater.
 - [x] Replace model/session select boxes with tab completion and Markdown listings.
 - [ ] Vendor static copies of frontend dependencies instead of loading them from CDNs.
 - [x] Support Anthropic Claude Code OAuth token auth; do not support Claude web session-cookie auth.
-- [ ] Add CSS theme support.
+- [x] Add CSS theme support.
 - [x] Add tab completion in the composer.
   - [x] Backend: expose one `complete(text, cursor, tab_id)` API that returns `{range, items}`; keep completion state on the client, not in chat history.
   - [x] Complete slash command names from `commands.command_rows()` and skill names from `skills.list_skills()` when the token starts with `/`.
