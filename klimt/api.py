@@ -7,6 +7,7 @@ live in klimt.runner / klimt.tool_runner.
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import threading
 from pathlib import Path
@@ -233,7 +234,7 @@ class ChatSession:
 
         return dispatch
 
-    def stream(self, user_text: str, emit: Emit) -> None:
+    def stream(self, user_text: str, emit: Emit, attachments: list[dict[str, Any]] | None = None) -> None:
         """Push events for one user turn.
 
         Event shapes:
@@ -244,8 +245,18 @@ class ChatSession:
           {type: 'tool_start', id, name, args}
           {type: 'tool', id, name, args, result}
           {type: 'error', message: str}
+
+        `attachments` is an optional list of image envelopes (dicts with
+        _klimt_image, media_type, data, bytes) prepended as user-role
+        messages before the text turn. They are stored as JSON strings,
+        the same envelope form visual.py produces, so providers.py
+        recognises them with parse_envelope() and expands them natively.
         """
         self._cancel.clear()
+        for att in attachments or []:
+            # Store as JSON string — same on-history form as visual tool results.
+            content = att if isinstance(att, str) else json.dumps(att, ensure_ascii=False)
+            self.history.append({"role": "user", "content": content})
         self.history.append({"role": "user", "content": user_text})
         completed = run_turn(
             provider=self._provider,

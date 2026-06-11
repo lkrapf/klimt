@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Dict, List
 
+from .tool_impl import visual as _visual
+
 # Each image block is roughly this many tokens in the chars/4 heuristic.
 _IMAGE_TOKEN_ESTIMATE = 4800
 
@@ -17,11 +19,19 @@ def estimate_tokens(msg: Dict[str, Any]) -> int:
 
     chars/4 heuristic matching Pi's fallback strategy. Counts text content,
     tool-call name+arguments, and a flat per-image allowance.
+
+    Image envelopes (pasted images or visual tool results stored as JSON
+    strings) are detected and counted as a flat image allowance instead of
+    their raw base64 size, which would massively over-estimate token cost.
     """
     chars = 0
     content = msg.get("content")
     if isinstance(content, str):
-        chars += len(content)
+        envelope = _visual.parse_envelope(content)
+        if envelope is not None:
+            chars += _IMAGE_TOKEN_ESTIMATE * 4  # restore chars from flat estimate
+        else:
+            chars += len(content)
     elif isinstance(content, list):
         for block in content:
             if isinstance(block, dict):

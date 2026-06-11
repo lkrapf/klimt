@@ -395,12 +395,63 @@ body.hide-reasoning .msg.reasoning { display: none; }
 /* ── Composer ── */
 #composer {
   display: flex;
-  gap: 10px;
+  flex-direction: column;
+  gap: 6px;
   padding: 8px 12px;
   border-top: 1px solid var(--border);
 }
+
+/* ── Attachment strip ── */
+#attachment-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+#attachment-strip:empty { display: none; }
+.attachment-thumb {
+  position: relative;
+  display: inline-block;
+}
+.attachment-thumb img {
+  display: block;
+  max-height: 72px;
+  max-width: 120px;
+  border: 1px solid var(--border);
+  object-fit: cover;
+}
+.attachment-remove {
+  position: absolute;
+  top: 0;
+  right: 0;
+  background: var(--bg);
+  color: var(--hot);
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 1px 3px;
+  opacity: 0.8;
+}
+.attachment-remove:hover { opacity: 1; }
+
+/* Inline thumbnails inside transcript bubbles */
+.attachment-inline-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.attachment-inline {
+  max-height: 200px;
+  max-width: 100%;
+  display: block;
+  border: 1px solid var(--border);
+}
+
 #input {
-  flex: 1;
+  flex: none;
+  width: 100%;
+  box-sizing: border-box;
   resize: none;
   min-height: 34px;
   max-height: 240px;

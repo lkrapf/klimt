@@ -23,6 +23,8 @@ from . import __version__, command_handlers, commands, completion, compaction, s
 from .api import ChatSession
 from .model_config import list_model_names
 from .session_factory import new_session
+from .tool_impl import visual as _visual
+from .tool_impl.limits import VISUAL_MAX_BYTES
 
 
 class _SingleTabApi:
@@ -100,7 +102,7 @@ class _SingleTabApi:
     def _done(self) -> None:
         self._emit({"type": "done"})
 
-    def send(self, text: str) -> dict:
+    def send(self, text: str, attachments: list | None = None) -> dict:
         background = False
         try:
             command = text.strip()
@@ -125,6 +127,11 @@ class _SingleTabApi:
                 if handled:
                     return {"ok": True}
 
+            err = self._validate_attachments(attachments)
+            if err:
+                self._emit({"type": "error", "message": err})
+                return {"ok": False, "error": err}
+
             self._session.maybe_title_from_first_input(command)
             self._session.remember_input(command)
             # No-op until the session is kept; auto-titling above only sets the
@@ -144,7 +151,7 @@ class _SingleTabApi:
             background = True
             worker = threading.Thread(
                 target=self._stream_worker,
-                args=(session, text, generation),
+                args=(session, text, generation, attachments),
                 daemon=True,
             )
             self._worker = worker
@@ -161,6 +168,42 @@ class _SingleTabApi:
             if not background:
                 with contextlib.suppress(Exception):
                     self._done()
+
+    def _validate_attachments(self, attachments: list | None) -> str | None:
+        """Return an error string if any attachment is invalid, else None."""
+        if not attachments:
+            return None
+        if not self._session.model_config().vision:
+            return (
+                f"error: image attachments require a vision-capable model, "
+                f"but {self._session.model!r} does not support image input. "
+                f"Switch to a vision-capable model (e.g. claude-sonnet-4-6) first."
+            )
+        import base64
+        for i, att in enumerate(attachments):
+            data = att.get("data") if isinstance(att, dict) else None
+            if not data:
+                return f"error: attachment {i}: missing base64 data"
+            try:
+                raw = base64.b64decode(data, validate=True)
+            except Exception:
+                return f"error: attachment {i}: invalid base64"
+            if len(raw) == 0:
+                return f"error: attachment {i}: empty image"
+            if len(raw) > VISUAL_MAX_BYTES:
+                return (
+                    f"error: attachment {i}: image too large ({len(raw)} bytes, "
+                    f"cap {VISUAL_MAX_BYTES}); resize or crop first"
+                )
+            media_type = _visual._sniff_media_type(raw)
+            if not media_type:
+                return f"error: attachment {i}: unsupported format (expected PNG, JPEG, GIF, or WebP)"
+            # Normalise: replace caller-supplied media_type with sniffed one
+            # and embed byte count so envelope_summary is informative.
+            att["media_type"] = media_type
+            att["bytes"] = len(raw)
+            att["_klimt_image"] = True
+        return None
 
     def _is_busy(self) -> bool:
         with self._busy_lock:
@@ -181,10 +224,10 @@ class _SingleTabApi:
             with contextlib.suppress(Exception):
                 self._done()
 
-    def _stream_worker(self, session: ChatSession, text: str, generation: int) -> None:
+    def _stream_worker(self, session: ChatSession, text: str, generation: int, attachments: list | None = None) -> None:
         emit = lambda event: self._emit_current(generation, event)
         try:
-            session.stream(text, emit)
+            session.stream(text, emit, attachments=attachments)
             if generation == self._generation:
                 self._sync_input_history()
         except Exception as e:  # noqa: BLE001
@@ -350,8 +393,8 @@ class Api:
             "active_tab": self._first_tab_id,
         }
 
-    def send(self, text: str, tab_id: str | None = None) -> dict:
-        return self._tab(tab_id).send(text)
+    def send(self, text: str, tab_id: str | None = None, attachments: list | None = None) -> dict:
+        return self._tab(tab_id).send(text, attachments=attachments)
 
     def interrupt(self, tab_id: str | None = None) -> dict:
         return self._tab(tab_id).interrupt()

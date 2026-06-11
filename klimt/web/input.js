@@ -2,6 +2,7 @@ import { acceptVisibleCompletion, cancelCompletion, completeAtCursor } from "./c
 import { setQueueCount, setWorking as setWorkingStatus } from "./status.js";
 import { activeTab, activeId, activateTab, addTab, allTabs, closeTab as closeLocalTab, updateTab } from "./tabs.js";
 import { addMessage, addPending, finalizeStreaming, useTranscript } from "./transcript.js";
+import { clearAttachments, getPendingAttachments, installAttachmentHandlers } from "./attachments.js";
 
 const input = document.getElementById("input");
 let historyPos = null;
@@ -131,16 +132,35 @@ export async function submitCommand(klimt, text, { echo = true, tab = activeTab(
   if (!text) return false;
   if (tab.working) return queueCommand(tab, text, echo);
 
+  const attachments = getPendingAttachments();
+  clearAttachments();
+
   rememberInput(tab, text);
   setInputValue("");
   tab.working = true;
   updateActiveStatus(tab);
   useTranscript(tab.id);
-  if (echo) addMessage("user", text, { markdown: false });
+  if (echo) {
+    const msgDiv = addMessage("user", text, { markdown: false });
+    // Render attachment thumbnails above the text in the user bubble
+    if (attachments.length) {
+      const body = msgDiv.querySelector(".body");
+      const thumbWrap = document.createElement("div");
+      thumbWrap.className = "attachment-inline-list";
+      for (const att of attachments) {
+        const img = document.createElement("img");
+        img.className = "attachment-inline";
+        img.src = `data:${att.media_type};base64,${att.data}`;
+        img.alt = att.name || "image";
+        thumbWrap.appendChild(img);
+      }
+      body.prepend(thumbWrap);
+    }
+  }
   tab.pending = addPending(text.startsWith("!") ? "running" : "thinking");
 
   try {
-    const res = await window.pywebview.api.send(text, tab.id);
+    const res = await window.pywebview.api.send(text, tab.id, attachments.length ? attachments : null);
     if (!res.ok) {
       useTranscript(tab.id);
       addMessage("error", "**Error:** " + res.error);
@@ -279,6 +299,7 @@ export function installInputHandlers(klimt) {
     }
   }, true);
 
+  installAttachmentHandlers(input);
   window.klimtTabControls = { createNewTab, closeTab };
   resizeInput();
   input.focus();

@@ -6,6 +6,7 @@
  */
 import { enhance, renderMarkdown } from "./render.js";
 import { transcriptFor } from "./tabs.js";
+import { renderAttachmentThumbnail } from "./attachments.js";
 
 let currentTabId = null;
 
@@ -40,7 +41,13 @@ export function addMessage(role, text, { markdown = true } = {}) {
 
   const body = document.createElement("div");
   body.className = "body";
-  if (markdown) {
+
+  // Detect a _klimt_image envelope (pasted image replayed from history).
+  const envelope = _parseImageEnvelope(text);
+  if (envelope) {
+    body.classList.add("plain");
+    body.appendChild(renderAttachmentThumbnail(envelope));
+  } else if (markdown) {
     body.innerHTML = renderMarkdown(text);
     enhance(body);
   } else {
@@ -53,6 +60,15 @@ export function addMessage(role, text, { markdown = true } = {}) {
   appendToTranscript(div);
   scrollToBottom();
   return div;
+}
+
+function _parseImageEnvelope(text) {
+  if (typeof text !== "string" || !text.trimStart().startsWith("{")) return null;
+  try {
+    const obj = JSON.parse(text);
+    if (obj && obj._klimt_image === true && obj.data && obj.media_type) return obj;
+  } catch (_) {}
+  return null;
 }
 
 export function addPending(label = "thinking") {

@@ -123,6 +123,9 @@ def _chat_completions_sanitize_messages(
     content parts on a `role: tool` message, so the tool result is kept as a
     short text placeholder and an extra synthetic `user` message carrying the
     image is inserted immediately after.
+
+    User-turn image envelopes (pasted images) are expanded into a multi-part
+    user message with text + image_url parts.
     """
     out: list[dict[str, Any]] = []
     for msg in messages:
@@ -136,6 +139,28 @@ def _chat_completions_sanitize_messages(
                     "tool_call_id": msg.get("tool_call_id") or "",
                     "content": placeholder,
                 })
+                out.append({
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": placeholder},
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": (
+                                    f"data:{envelope.get('media_type', 'image/png')};"
+                                    f"base64,{envelope.get('data', '')}"
+                                ),
+                            },
+                        },
+                    ],
+                })
+                continue
+            out.append(msg)
+            continue
+        if role == "user":
+            envelope = _visual.parse_envelope(msg.get("content"))
+            if envelope is not None:
+                placeholder = _visual.envelope_summary(envelope)
                 out.append({
                     "role": "user",
                     "content": [
@@ -250,7 +275,15 @@ def _bedrock_messages(messages: list[dict[str, Any]], *, vision: bool = True) ->
                 })
             _append_bedrock_message(out, "assistant", blocks or [{"text": ""}])
         elif role == "user":
-            _append_bedrock_message(out, "user", _bedrock_user_blocks(msg.get("content")))
+            envelope = _visual.parse_envelope(msg.get("content"))
+            if envelope is not None:
+                blocks: list[dict[str, Any]] = [{"text": _visual.envelope_summary(envelope)}]
+                image = _bedrock_image_block(envelope) if vision else None
+                if image is not None:
+                    blocks.append({"image": image})
+                _append_bedrock_message(out, "user", blocks)
+            else:
+                _append_bedrock_message(out, "user", _bedrock_user_blocks(msg.get("content")))
     return out
 
 
@@ -591,7 +624,22 @@ def _anthropic_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
                 })
             _append_anthropic_message(out, "assistant", blocks or [{"type": "text", "text": ""}])
         elif role == "user":
-            _append_anthropic_message(out, "user", [{"type": "text", "text": str(msg.get("content") or "")}])
+            envelope = _visual.parse_envelope(msg.get("content"))
+            if envelope is not None:
+                placeholder = _visual.envelope_summary(envelope)
+                _append_anthropic_message(out, "user", [
+                    {"type": "text", "text": placeholder},
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": envelope.get("media_type", "image/png"),
+                            "data": envelope.get("data", ""),
+                        },
+                    },
+                ])
+            else:
+                _append_anthropic_message(out, "user", [{"type": "text", "text": str(msg.get("content") or "")}])
     return out
 
 

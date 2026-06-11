@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List
 
 from .context_usage import estimate_tokens
+from .tool_impl import visual as _visual
 
 # Marker prefix on the replacement user message. ChatSession's replay code
 # checks for this prefix to render the entry as a system note rather than a
@@ -161,8 +162,17 @@ def chunk_messages(messages: List[Dict[str, Any]], max_tokens: int) -> List[List
 
 
 def _message_for_compaction(msg: Dict[str, Any], index: int) -> str:
-    """Stable, readable transcript entry for compaction."""
+    """Stable, readable transcript entry for compaction.
+
+    Image envelopes (pasted images or visual tool results) are replaced by
+    their short text summary so the compaction model never sees raw base64.
+    """
     clean = {k: v for k, v in msg.items() if k != "usage"}
+    content = clean.get("content")
+    envelope = _visual.parse_envelope(content)
+    if envelope is not None:
+        clean = dict(clean)
+        clean["content"] = _visual.envelope_summary(envelope)
     return f"<message index={index} role={clean.get('role', '')}>\n" + json.dumps(
         clean,
         ensure_ascii=False,

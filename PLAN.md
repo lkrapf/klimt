@@ -113,9 +113,8 @@ roadmap theater.
 
 - [x] Links (and similar activations) must never navigate the Klimt window itself; open externally or not at all.
 - [x] Handle output wider than the window without a horizontal scrollbar. Lean toward forced wrapping; figure out how to do it sanely for code blocks and tool output.
-- [ ] Allow hiding reasoning blocks (via hotkey and potentially config).
-
-## Context management
+- [ ] Support pasting images into the composer (via clipboard or drag-and-drop).
+- [ ] Implement image upload/handling in the backend so they can be included in message history and sent to vision-capable models.
 
 - [ ] Add automatic context compaction threshold.
 - [ ] Expose compaction settings in the UI or config if needed.
