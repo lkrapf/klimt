@@ -275,6 +275,25 @@ skill description.
 | `/quit` | Close Klimt. |
 | `/<skill>` | Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation. |
 
+## Image attachments
+
+Images can be attached to any message by pasting (`Cmd+V` / `Ctrl+V`) or
+dragging a file onto the input box. Thumbnails appear in the attachment strip
+above the textarea; click `×` on a thumbnail to remove it before sending.
+
+On send, Klimt validates the attachment (format, size cap) and inlines it into
+the user turn. The image is expanded into the correct multi-part format for each
+provider — `image_url` for OpenAI-compatible endpoints, `image` blocks for
+Anthropic native and Bedrock. Images are stored as compact JSON envelopes in
+session history, so they survive save/reload and replay as inline thumbnails in
+the transcript.
+
+Requirements:
+
+- The active model must have `vision: true` in `~/.klimt/models.json`. Sending
+  with a non-vision model returns an error.
+- Supported formats: PNG, JPEG, GIF, WebP.
+
 ## Keys and UI
 
 Klimt has independent UI tabs. Each tab owns its own session, model, history,
