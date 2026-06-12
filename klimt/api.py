@@ -14,6 +14,8 @@ from pathlib import Path
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List
 
+import copy
+
 from . import agent_runner, agents as agents_mod, tools as tools_mod
 from . import compaction as compaction_mod
 from . import context_usage as context_usage_mod
@@ -139,6 +141,71 @@ class ChatSession:
             self.history,
             self.model_config().context_window,
         )
+
+    def back_turns(self) -> list[dict[str, Any]]:
+        """Return a list of turn descriptors for /back, oldest first.
+
+        Each entry: {index, cut, user_preview, assistant_preview}.
+        `cut` is the history index to pass to rewind_to() to truncate
+        history after this turn (history[:cut] is what is kept).
+        """
+        turns: list[dict[str, Any]] = []
+        i = 0
+        while i < len(self.history):
+            msg = self.history[i]
+            if msg.get("role") != "user":
+                i += 1
+                continue
+            content = msg.get("content") or ""
+            # Skip injected compaction / summary notes — not real turns.
+            if content.startswith(compaction_mod.COMPACTED_NOTE_PREFIX):
+                i += 1
+                continue
+            # Find the assistant reply in this turn.
+            j = i + 1
+            assistant_preview = ""
+            while j < len(self.history):
+                r = self.history[j].get("role")
+                if r == "user":
+                    break
+                if r == "assistant" and not assistant_preview:
+                    assistant_content = self.history[j].get("content") or ""
+                    assistant_preview = assistant_content[:120].replace("\n", " ").strip()
+                j += 1
+            user_preview = content[:120].replace("\n", " ").strip()
+            # cut = j: history[:j] keeps this turn and everything before it.
+            turns.append({
+                "index": len(turns),
+                "cut": j,
+                "user_preview": user_preview,
+                "assistant_preview": assistant_preview,
+            })
+            i = j
+        return turns
+
+    def rewind_to(self, cut: int, summarize: bool = False) -> str:
+        """Truncate history to history[:cut], dropping everything after it.
+
+        Optionally injects a summary of the dropped turns at the end.
+        Returns a short status string.
+        """
+        if cut < 0 or cut > len(self.history):
+            return "invalid cut point"
+        kept = self.history[:cut]
+        dropped = self.history[cut:]
+        if not dropped:
+            return "nothing to remove"
+        if summarize:
+            note = compaction_mod.summarize_slice(
+                dropped,
+                self._compact_text,
+                label=f"{len(dropped)} message(s)",
+            )
+            self.history = copy.deepcopy(kept) + [{"role": "user", "content": note}]
+        else:
+            self.history = copy.deepcopy(kept)
+        self.persist()
+        return f"removed {len(dropped)} message(s) from history"
 
     def compact(self, keep_recent: int = 8) -> str:
         """Compact older history into a structured state note.
