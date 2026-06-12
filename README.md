@@ -266,11 +266,9 @@ skill description.
 | `/theme [name]` | Show or switch the UI CSS theme. Use Tab to complete names. |
 | `/new` | Start a new empty session. |
 | `/session <name>` | Resume a saved session. Use Tab to complete names. |
-| `/sessions` | List saved sessions for this folder. |
-| `/sessions resume <number\|name>` | Resume a saved session. |
-| `/sessions delete <number\|name>` | Delete a saved session. |
-| `/sessions clear confirm` | Delete all saved sessions for this folder and start a new one. |
+| `/sessions` | List saved sessions for this folder and pick one to resume or delete. |
 | `/save [name]` | Save this session to disk, optionally under a new name. |
+| `/back` | Go back to an earlier turn in the conversation. |
 | `/reload` | Reload prompt layers, skills, tools, model config, and CSS. |
 | `/quit` | Close Klimt. |
 | `/<skill>` | Load `~/.klimt/skills/<skill>/SKILL.md` into the conversation. |
@@ -311,7 +309,7 @@ Keyboard shortcuts:
 - `Enter` — send.
 - `Shift+Enter` — newline.
 - `Tab` — complete commands, paths, models, and session names at the cursor.
-- `Esc` — close completion popup, or interrupt current tab's work.
+- `Esc` — close completion popup, interrupt current tab's work, or cancel a pending `/back` or `/sessions` prompt.
 - `Ctrl+T` — new tab.
 - `Ctrl+W` — close current tab.
 - `Ctrl+Tab` / `Ctrl+Shift+Tab` — next / previous tab.
@@ -372,7 +370,23 @@ Sessions are stored per working folder under:
 ```
 
 A new session starts with a generated name and is renamed from the first normal
-user prompt. `/sessions` lists saved sessions for the current folder.
+user prompt.
+
+`/sessions` shows a numbered list of saved sessions for the current folder and
+waits for a reply:
+
+- `<n>` — resume session *n*.
+- `delete <n>` — delete session *n*. If the active session is deleted, a new one starts. The updated list is shown so you can delete more without re-typing `/sessions`.
+- `clear` — delete all saved sessions for this folder and start a new one.
+- Any other reply (or Esc) — cancel.
+
+`/back` lists the conversation turns and waits for a reply:
+
+- `<n>` — truncate history to turn *n*, dropping everything after it.
+- `<n> summary` — same, but inject a compacted summary of the dropped turns into context.
+- Any other reply (or Esc) — cancel.
+
+`/cd` changes the working directory for the current session. Sessions are scoped to their original folder; switching directory does not carry the current session into the new folder's session list.
 
 ## Architecture
 
