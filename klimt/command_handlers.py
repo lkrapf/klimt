@@ -73,6 +73,14 @@ class CommandContext:
     def set_theme(self, name: str) -> None:
         self.tab._set_theme(name)
 
+    @property
+    def pending_back(self) -> list[dict] | None:
+        return self.tab._pending_back
+
+    @pending_back.setter
+    def pending_back(self, value: list[dict] | None) -> None:
+        self.tab._pending_back = value
+
 
 Handler = Callable[[CommandContext, str], None]
 
@@ -118,7 +126,9 @@ def cd(ctx: CommandContext, arg: str) -> None:
     session.cwd = str(resolved)
     session.system = ctx.build_system_prompt(session.cwd)
     session.store = session.store.for_folder(session.cwd)
-    session.persist()
+    # Do NOT persist here — that would write the current session into the new
+    # folder's store, making it appear in /sessions for the wrong directory.
+    ctx.session_choices = []
     ctx.sync()
     ctx.emit({"type": "text", "content": f"cwd set to `{presenters.md_escape(session.cwd)}`"})
 
@@ -256,6 +266,16 @@ def quit_(ctx: CommandContext, arg: str) -> None:
     os._exit(0)
 
 
+def back(ctx: CommandContext, arg: str) -> None:
+    turns = ctx.session.back_turns()
+    if not turns:
+        ctx.emit({"type": "text", "content": "_nothing to go back to_"})
+        return
+    from . import presenters
+    ctx.pending_back = turns
+    ctx.emit({"type": "text", "content": presenters.back_markdown(turns)})
+
+
 def load_skill(ctx: CommandContext, name: str) -> None:
     """Fallback handler for `/<skill>`. Loads the named skill into history."""
     for e in commands.load_skill(ctx.session, name):
@@ -364,6 +384,7 @@ HANDLERS: dict[str, tuple[Handler, int]] = {
     "/model": (model, len("/model")),
     "/reload": (reload_, len("/reload")),
     "/quit": (quit_, len("/quit")),
+    "/back": (back, len("/back")),
 }
 
 
