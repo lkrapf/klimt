@@ -92,11 +92,8 @@ def sessions_markdown(sessions: list[dict[str, Any]]) -> str:
         lines.append(f"| {i} | {name} | {model} | {updated} | {messages} | {inputs} |")
     lines.extend([
         "",
-        "Commands:",
-        "",
-        "- `/sessions resume <number|name>` — resume a session from this list, or by name.",
-        "- `/sessions delete <number|name>` — delete a saved session. Deleting the active session starts a new one.",
-        "- `/sessions clear confirm` — delete all saved sessions for this folder and start a new one.",
+        "Reply with a number to resume that session, `delete <n>` to delete it, or `clear` to wipe all sessions.",
+        "Any other reply cancels.",
     ])
     return "\n".join(lines)
 
@@ -147,6 +144,29 @@ def unknown_choice_markdown(kind: str, requested: str, choices: list[str], empty
         f"_unknown {kind}: `{md_escape(requested)}`_\n\n"
         f"{_choice_header(kind)}: {formatted}"
     )
+
+
+def back_markdown(turns: list[dict[str, Any]]) -> str:
+    """Render the /back turn-selection prompt."""
+    lines = [
+        "## Go back to",
+        "",
+        "| # | you said | assistant replied |",
+        "|---:|---|---|",
+    ]
+    for t in turns:
+        n = t["index"] + 1  # 1-based
+        user = table_cell(t["user_preview"] or "(no text)")
+        asst = table_cell(t["assistant_preview"] or "(no reply yet)")
+        lines.append(f"| {n} | {user} | {asst} |")
+    lines.extend([
+        "",
+        "Reply with the number of the turn to resume from. Earlier turns are dropped.",
+        "Add `summary` to inject a summary of the dropped turns into context.",
+        "",
+        "_Example: `2` or `2 summary`. Any other reply cancels._",
+    ])
+    return "\n".join(lines)
 
 
 def _choice_header(kind: str) -> str:

@@ -60,6 +60,52 @@ If a section has nothing useful, write `- none`.
 CompactCall = Callable[[str], str]
 
 
+def summarize_slice(
+    messages: List[Dict[str, Any]],
+    compact_text: CompactCall,
+    label: str = "dropped turns",
+) -> str:
+    """Summarize an arbitrary message slice into a compaction note string.
+
+    Used by ChatSession.rewind() to inject a summary of the removed turns
+    into the history before truncating.
+    """
+    if not messages:
+        return ""
+    chunk_budget = int(os.environ.get("KLIMT_COMPACTION_CHUNK_TOKENS", "24000"))
+    chunks = chunk_messages(messages, chunk_budget)
+    summaries: list[str] = []
+    offset = 0
+    for n, chunk in enumerate(chunks, start=1):
+        transcript = "\n\n".join(
+            _message_for_compaction(msg, offset + i)
+            for i, msg in enumerate(chunk)
+        )
+        offset += len(chunk)
+        summaries.append(compact_text(
+            f"Compact transcript chunk {n}/{len(chunks)}.\n\n{transcript}"
+        ))
+    if len(summaries) == 1:
+        compacted = summaries[0]
+    else:
+        joined = "\n\n---\n\n".join(
+            f"# Chunk summary {i}\n\n{s}"
+            for i, s in enumerate(summaries, start=1)
+        )
+        compacted = compact_text(
+            "Merge these chunk summaries into one coherent compacted state. "
+            "Remove duplication, preserve uncertainty and provenance.\n\n"
+            + joined
+        )
+    stamp = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    return (
+        f"{COMPACTED_NOTE_PREFIX} at {stamp}. Summary of {label}:]\n\n"
+        "The following turns were removed by /back and replaced by this summary. "
+        "Treat it as context, not as a new user task.\n\n"
+        f"{compacted.strip()}"
+    )
+
+
 @dataclass(frozen=True)
 class CompactionResult:
     history: list[Dict[str, Any]]

@@ -43,14 +43,6 @@ class CommandContext:
     def session(self, value: ChatSession) -> None:
         self.tab._session = value
 
-    @property
-    def session_choices(self) -> list[dict]:
-        return self.tab._session_choices
-
-    @session_choices.setter
-    def session_choices(self, value: list[dict]) -> None:
-        self.tab._session_choices = value
-
     # bridge -------------------------------------------------------------
     def emit(self, event: dict) -> None:
         self.tab._emit(event)
@@ -80,6 +72,14 @@ class CommandContext:
     @pending_back.setter
     def pending_back(self, value: list[dict] | None) -> None:
         self.tab._pending_back = value
+
+    @property
+    def pending_sessions(self) -> list[dict] | None:
+        return self.tab._pending_sessions
+
+    @pending_sessions.setter
+    def pending_sessions(self, value: list[dict] | None) -> None:
+        self.tab._pending_sessions = value
 
 
 Handler = Callable[[CommandContext, str], None]
@@ -128,7 +128,6 @@ def cd(ctx: CommandContext, arg: str) -> None:
     session.store = session.store.for_folder(session.cwd)
     # Do NOT persist here — that would write the current session into the new
     # folder's store, making it appear in /sessions for the wrong directory.
-    ctx.session_choices = []
     ctx.sync()
     ctx.emit({"type": "text", "content": f"cwd set to `{presenters.md_escape(session.cwd)}`"})
 
@@ -152,7 +151,6 @@ def new(ctx: CommandContext, arg: str) -> None:
     prior_model = ctx.session.model
     ctx.session.interrupt()
     ctx.session = ctx.new_session(cwd=ctx.session.cwd, model=prior_model)
-    ctx.session_choices = []
     ctx.emit({"type": "clear"})
     ctx.sync()
     ctx.emit({"type": "text", "content": f"new session **{presenters.md_escape(ctx.session.session_name)}**"})
@@ -163,23 +161,12 @@ def session_(ctx: CommandContext, arg: str) -> None:
 
 
 def sessions(ctx: CommandContext, arg: str) -> None:
-    if not arg:
-        _list_sessions(ctx)
+    items = ctx.session.list_sessions()
+    if not items:
+        ctx.emit({"type": "text", "content": "_no saved sessions for this folder_"})
         return
-
-    cmd, _, rest = arg.partition(" ")
-    rest = rest.strip()
-    if cmd == "resume" and rest:
-        _resume_session(ctx, rest, usage="/sessions resume <number|name>")
-        return
-    if cmd == "delete" and rest:
-        _delete_session(ctx, rest)
-        return
-    if cmd == "clear" and rest == "confirm":
-        _clear_sessions(ctx)
-        return
-
-    ctx.emit({"type": "text", "content": "_usage: `/sessions`, `/sessions resume <number|name>`, `/sessions delete <number|name>`, or `/sessions clear confirm`_"})
+    ctx.pending_sessions = items
+    ctx.emit({"type": "text", "content": presenters.sessions_markdown(items)})
 
 
 def save(ctx: CommandContext, arg: str) -> None:
@@ -286,47 +273,24 @@ def load_skill(ctx: CommandContext, name: str) -> None:
 # --- sessions sub-helpers ----------------------------------------------------
 
 
-def _list_sessions(ctx: CommandContext) -> None:
-    items = ctx.session.list_sessions()
-    ctx.session_choices = items
-    ctx.emit({"type": "text", "content": presenters.sessions_markdown(items)})
-
-
-def _resolve_session_name(ctx: CommandContext, arg: str) -> str:
-    """Resolve a session name or 1-based index from the latest `/sessions` list."""
-    name = arg.strip()
-    if not name or not name.isdecimal():
-        return name
-
-    index = int(name)
-    if index <= 0:
-        return name
-
-    if not ctx.session_choices:
-        ctx.session_choices = ctx.session.list_sessions()
-
-    if 1 <= index <= len(ctx.session_choices):
-        return str(ctx.session_choices[index - 1].get("name") or "")
-
-    return name
-
-
-def _delete_session(ctx: CommandContext, target: str) -> None:
-    name = _resolve_session_name(ctx, target)
+def _delete_session_by_name(ctx: CommandContext, name: str) -> None:
     if not ctx.session.store.exists(name):
-        ctx.emit({"type": "text", "content": f"_unknown session: `{presenters.md_escape(target)}`_"})
+        ctx.emit({"type": "text", "content": f"_unknown session: `{presenters.md_escape(name)}`_"})
         return
 
     active = name == ctx.session.session_name
     ctx.session.store.delete(name)
-    ctx.session_choices = []
     if active:
         new(ctx, "")
         ctx.emit({"type": "text", "content": f"deleted active session **{presenters.md_escape(name)}**"})
         return
 
     ctx.emit({"type": "text", "content": f"deleted session **{presenters.md_escape(name)}**"})
-    _list_sessions(ctx)
+    # Re-show the updated list.
+    items = ctx.session.list_sessions()
+    if items:
+        ctx.pending_sessions = items
+        ctx.emit({"type": "text", "content": presenters.sessions_markdown(items)})
 
 
 def _clear_sessions(ctx: CommandContext) -> None:
@@ -335,29 +299,17 @@ def _clear_sessions(ctx: CommandContext) -> None:
     old_cwd = ctx.session.cwd
     ctx.session.store.clear()
     ctx.session = ctx.new_session(cwd=old_cwd, model=prior_model)
-    ctx.session_choices = []
     ctx.emit({"type": "clear"})
     ctx.sync()
     ctx.emit({"type": "text", "content": "deleted all sessions for this folder"})
     ctx.emit({"type": "text", "content": f"new session **{presenters.md_escape(ctx.session.session_name)}**"})
 
 
-def _resume_session(ctx: CommandContext, name: str, usage: str) -> None:
-    if not name:
-        ctx.emit({"type": "text", "content": f"_usage: `{usage}`_"})
+def _resume_session_by_name(ctx: CommandContext, name: str) -> None:
+    if not ctx.session.load_session(name):
+        ctx.emit({"type": "text", "content": f"_unknown session: `{presenters.md_escape(name)}`_"})
         return
 
-    requested = name.strip()
-    resolved = _resolve_session_name(ctx, requested)
-    if not ctx.session.load_session(resolved):
-        hint = "\n\nRun `/sessions` to refresh the numbered list." if requested.isdecimal() else ""
-        ctx.emit({
-            "type": "text",
-            "content": f"_unknown session: `{presenters.md_escape(requested)}`_{hint}",
-        })
-        return
-
-    ctx.session_choices = []
     ctx.replay()
     ctx.sync()
     ctx.emit({"type": "text", "content": f"resumed session **{presenters.md_escape(ctx.session.session_name)}**"})

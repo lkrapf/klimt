@@ -27,6 +27,21 @@ from .tool_impl import visual as _visual
 from .tool_impl.limits import VISUAL_MAX_BYTES
 
 
+def _resolve_from_items(token: str, items: list[dict[str, Any]]) -> str | None:
+    """Resolve a 1-based numeric token or bare name against a sessions list.
+
+    Returns the session name string, or None if the token is invalid.
+    """
+    token = token.strip()
+    if token.isdecimal():
+        idx = int(token) - 1
+        if 0 <= idx < len(items):
+            return str(items[idx].get("name") or "")
+        return None
+    # bare name — accept as-is (let the caller verify existence)
+    return token if token else None
+
+
 class _SingleTabApi:
     """One independent chat tab. Exposed through the multi-tab Api below."""
 
@@ -43,7 +58,8 @@ class _SingleTabApi:
         self._emit_to_window = emit
         self._get_theme = get_theme or themes.default_theme
         self._set_theme = set_theme or (lambda name: None)
-        self._session_choices: list[dict[str, Any]] = []
+        self._pending_back: list[dict[str, Any]] | None = None
+        self._pending_sessions: list[dict[str, Any]] | None = None
         self._busy = False
         self._busy_lock = threading.Lock()
         self._generation = 0
@@ -105,6 +121,16 @@ class _SingleTabApi:
     def send(self, text: str, attachments: list | None = None) -> dict:
         background = False
         try:
+            # Intercept pending interactive prompts before any other dispatch.
+            if self._pending_back is not None:
+                turns = self._pending_back
+                self._pending_back = None
+                return self._handle_back_reply(text.strip(), turns)
+            if self._pending_sessions is not None:
+                items = self._pending_sessions
+                self._pending_sessions = None
+                return self._handle_sessions_reply(text.strip(), items)
+
             command = text.strip()
             spec = commands.classify(command)
             if spec:
@@ -209,6 +235,68 @@ class _SingleTabApi:
         with self._busy_lock:
             return self._busy
 
+    def _handle_back_reply(self, text: str, turns: list[dict[str, Any]]) -> dict:
+        """Handle the user's reply to a /back turn-selection prompt."""
+        parts = text.lower().split()
+        summarize = "summary" in parts
+        token = next((p for p in parts if p != "summary"), "")
+        try:
+            if not token.isdecimal():
+                raise ValueError
+            idx = int(token) - 1  # 1-based display → 0-based list
+            if idx < 0 or idx >= len(turns):
+                raise ValueError
+        except ValueError:
+            self._emit({"type": "text", "content": "_invalid selection — /back cancelled_"})
+            self._done()
+            return {"ok": False, "error": "invalid back selection"}
+
+        cut = turns[idx]["cut"]
+        if summarize:
+            self._emit({"type": "text", "content": "summarizing dropped turns..."})
+        result = self._session.rewind_to(cut, summarize=summarize)
+        self._replay_session()
+        self._sync_input_history()
+        self._emit({"type": "text", "content": result})
+        self._done()
+        return {"ok": True}
+
+    def _handle_sessions_reply(self, text: str, items: list[dict[str, Any]]) -> dict:
+        """Handle the user's reply to an interactive /sessions prompt."""
+        parts = text.lower().split()
+        if not parts:
+            self._emit({"type": "text", "content": "_cancelled_"})
+            self._done()
+            return {"ok": False, "error": "cancelled"}
+
+        ctx = command_handlers.CommandContext(self)
+
+        # clear
+        if parts[0] == "clear":
+            command_handlers._clear_sessions(ctx)
+            return {"ok": True}
+
+        # delete <n>
+        if parts[0] == "delete" and len(parts) >= 2:
+            token = parts[1]
+            name = _resolve_from_items(token, items)
+            if name is None:
+                self._emit({"type": "text", "content": f"_invalid selection — /sessions cancelled_"})
+                self._done()
+                return {"ok": False, "error": "invalid selection"}
+            command_handlers._delete_session_by_name(ctx, name)
+            return {"ok": True}
+
+        # <n>  — resume
+        token = parts[0]
+        name = _resolve_from_items(token, items)
+        if name is None:
+            self._emit({"type": "text", "content": "_invalid selection — /sessions cancelled_"})
+            self._done()
+            return {"ok": False, "error": "invalid selection"}
+        command_handlers._resume_session_by_name(ctx, name)
+        return {"ok": True}
+
     def _handle_command(self, command: str, spec: commands.CommandSpec) -> bool:
         return command_handlers.dispatch(command_handlers.CommandContext(self), command)
 
@@ -289,7 +377,6 @@ class _SingleTabApi:
 
         with self._busy_lock:
             self._session = restored
-            self._session_choices = []
             self._busy = False
             self._active_base = None
             self._worker = None

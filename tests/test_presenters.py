@@ -57,7 +57,7 @@ def test_sessions_markdown_renders_row() -> None:
     }])
     assert "## Sessions" in md
     assert "| 1 | demo | azure-4.1 |" in md
-    assert "/sessions resume" in md
+    assert "resume" in md
 
 
 def test_models_markdown_empty() -> None:

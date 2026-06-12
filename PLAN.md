@@ -6,7 +6,7 @@ roadmap theater.
 ## Near term
 
 - [x] Queue user messages submitted while a request is active.
-- [ ] Add a session tree / branching model instead of only linear named sessions.
+- [x] Add `/back` to go back to an earlier conversation turn (destructive rewind with optional summary injection). Supersedes the session tree item — branching deferred indefinitely.
 - [x] Add independent UI tabs.
   - [x] Put tabs on top and move active-tab status below the input line.
   - [x] Each tab owns its own `ChatSession`, model, history, queue, and busy state.

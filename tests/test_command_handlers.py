@@ -41,7 +41,7 @@ class FakeCtx:
 
     def __init__(self) -> None:
         self.session = FakeSession()
-        self.session_choices: list[dict[str, Any]] = []
+        self.pending_sessions: list[dict[str, Any]] | None = None
         self.events: list[dict[str, Any]] = []
         self.synced = 0
         self.replays = 0
@@ -151,17 +151,21 @@ def test_theme_rejects_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     assert "unknown theme" in _text_events(ctx.events)[-1]
 
 
-def test_sessions_dispatch_no_arg_lists(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_sessions_no_saved_sessions(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = FakeCtx()
     monkeypatch.setattr(FakeSession, "list_sessions", lambda self: [])
     command_handlers.sessions(ctx, "")
     assert "no saved sessions" in _text_events(ctx.events)[-1]
+    assert ctx.pending_sessions is None
 
 
-def test_sessions_dispatch_unknown_subcommand_shows_usage() -> None:
+def test_sessions_with_saved_sessions_sets_pending(monkeypatch: pytest.MonkeyPatch) -> None:
     ctx = FakeCtx()
-    command_handlers.sessions(ctx, "wat")
-    assert "_usage:" in _text_events(ctx.events)[-1]
+    items = [{"name": "my-session", "updated": 0, "messages": 2, "inputs": 1, "model": "x", "cwd": "/tmp"}]
+    monkeypatch.setattr(FakeSession, "list_sessions", lambda self: items)
+    command_handlers.sessions(ctx, "")
+    assert ctx.pending_sessions == items
+    assert "my-session" in _text_events(ctx.events)[-1]
 
 
 def test_save_renames_when_arg_given() -> None:
