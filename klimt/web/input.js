@@ -282,10 +282,17 @@ export function installInputHandlers(klimt) {
     }
 
     if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
+      e.stopPropagation();
       if (activeTab().working) {
-        e.preventDefault();
-        e.stopPropagation();
         interruptWork(klimt);
+      } else {
+        // Tab is idle — may have a pending /back or /sessions prompt; let
+        // the backend clear it and emit a cancel notice if so.
+        window.pywebview.api.interrupt(activeTab().id).catch((e) => {
+          useTranscript(activeTab().id);
+          addMessage("error", "**Bridge error:** " + (e?.message || e));
+        });
       }
       return;
     }
