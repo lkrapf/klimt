@@ -345,6 +345,16 @@ class _SingleTabApi:
 
         if not was_busy:
             old_session.interrupt()
+            cancelled: list[str] = []
+            if self._pending_back is not None:
+                self._pending_back = None
+                cancelled.append("/back")
+            if self._pending_sessions is not None:
+                self._pending_sessions = None
+                cancelled.append("/sessions")
+            if cancelled:
+                self._emit({"type": "text", "content": f"_cancelled {' and '.join(cancelled)}_"})
+                self._done()
             return {"ok": True}
 
         # Python cannot safely kill a worker thread. Instead, cancel the old
