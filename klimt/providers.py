@@ -204,9 +204,10 @@ def _bedrock_request(
     max_completion_tokens: int,
 ) -> dict[str, Any]:
     system, rest = _split_system(messages)
+    bedrock_messages = _bedrock_messages(rest, vision=config.vision)
     request: dict[str, Any] = {
         "modelId": config.provider_model(),
-        "messages": _bedrock_messages(rest, vision=config.vision),
+        "messages": bedrock_messages,
         "inferenceConfig": {"maxTokens": max_completion_tokens},
     }
     if system:
@@ -227,7 +228,37 @@ def _bedrock_request(
     tools = _bedrock_tools(tool_schemas or [])
     if tools:
         request["toolConfig"] = {"tools": tools}
+    if config.cache_prompts:
+        _bedrock_apply_cache_points(request)
     return request
+
+
+def _bedrock_apply_cache_points(request: dict[str, Any]) -> None:
+    """Stamp cachePoint blocks on the most stable prefixes.
+
+    Bedrock prompt caching: append `{cachePoint: {type: "default"}}` after the
+    chunks we want cached. Three breakpoints today (Anthropic models accept 4):
+      1. end of `system` (kernel + tool manifest + AGENTS.md)
+      2. end of `toolConfig.tools` (tool schemas)
+      3. end of the last message's content (history prefix)
+
+    Cache hits return as `cacheReadInputTokens`; creations are billed at +25%
+    of input for 5-minute caches. Net win starts at the second turn.
+    """
+    system = request.get("system")
+    if system:
+        system.append({"cachePoint": {"type": "default"}})
+
+    tool_config = request.get("toolConfig")
+    if tool_config and tool_config.get("tools"):
+        tool_config["tools"].append({"cachePoint": {"type": "default"}})
+
+    messages = request.get("messages") or []
+    if messages:
+        last = messages[-1]
+        content = last.get("content")
+        if isinstance(content, list):
+            content.append({"cachePoint": {"type": "default"}})
 
 
 def _bedrock_messages(messages: list[dict[str, Any]], *, vision: bool = True) -> list[dict[str, Any]]:
@@ -358,13 +389,22 @@ def _bedrock_tools(tool_schemas: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def _bedrock_usage(usage: dict[str, Any]) -> Any:
     input_tokens = int(usage.get("inputTokens") or 0)
     output_tokens = int(usage.get("outputTokens") or 0)
-    total_tokens = int(usage.get("totalTokens") or input_tokens + output_tokens)
     cache_read = int(usage.get("cacheReadInputTokens") or 0)
+    cache_write = int(usage.get("cacheWriteInputTokens") or 0)
+    # Bedrock's `totalTokens` already accounts for cache reads/writes when the
+    # API populates it; only fall back to a manual sum when missing.
+    total_tokens = int(
+        usage.get("totalTokens")
+        or (input_tokens + output_tokens + cache_read + cache_write)
+    )
     return SimpleNamespace(
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
         total_tokens=total_tokens,
-        prompt_tokens_details=SimpleNamespace(cached_tokens=cache_read),
+        prompt_tokens_details=SimpleNamespace(
+            cached_tokens=cache_read,
+            cache_write_tokens=cache_write,
+        ),
     )
 
 
@@ -545,7 +585,45 @@ def _anthropic_payload(
     tools = _anthropic_tools(tool_schemas or [])
     if tools:
         payload["tools"] = tools
+    if config.cache_prompts:
+        _anthropic_apply_cache_breakpoints(payload)
     return payload
+
+
+def _anthropic_apply_cache_breakpoints(payload: dict[str, Any]) -> None:
+    """Mark the most stable prefixes with ephemeral cache breakpoints.
+
+    Anthropic prompt caching allows up to four `cache_control` breakpoints per
+    request. We claim three:
+      1. last `system` block (kernel + tool manifest + AGENTS.md)
+      2. last entry in `tools` (tool schemas)
+      3. last block of the last message (history prefix)
+
+    Each cache write costs +25% of input tokens; each read costs 10% of input.
+    The win shows up from turn two onward when the prefix repeats verbatim.
+    Header `prompt-caching-2024-07-31` is already implied for current models;
+    the OAuth beta header carries any required flag for the native endpoint.
+    """
+    system = payload.get("system")
+    if isinstance(system, list) and system:
+        last = system[-1]
+        if isinstance(last, dict):
+            last["cache_control"] = {"type": "ephemeral"}
+
+    tools = payload.get("tools")
+    if isinstance(tools, list) and tools:
+        last = tools[-1]
+        if isinstance(last, dict):
+            last["cache_control"] = {"type": "ephemeral"}
+
+    messages = payload.get("messages") or []
+    if messages:
+        last_msg = messages[-1]
+        content = last_msg.get("content")
+        if isinstance(content, list) and content:
+            last_block = content[-1]
+            if isinstance(last_block, dict):
+                last_block["cache_control"] = {"type": "ephemeral"}
 
 
 def _split_system(messages: list[dict[str, Any]]) -> tuple[str, list[dict[str, Any]]]:
@@ -711,11 +789,15 @@ def _anthropic_usage(usage: dict[str, Any]) -> Any:
     input_tokens = int(usage.get("input_tokens") or 0)
     output_tokens = int(usage.get("output_tokens") or 0)
     cache_read = int(usage.get("cache_read_input_tokens") or 0)
+    cache_write = int(usage.get("cache_creation_input_tokens") or 0)
     return SimpleNamespace(
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
-        prompt_tokens_details=SimpleNamespace(cached_tokens=cache_read),
+        total_tokens=input_tokens + output_tokens + cache_read + cache_write,
+        prompt_tokens_details=SimpleNamespace(
+            cached_tokens=cache_read,
+            cache_write_tokens=cache_write,
+        ),
     )
 
 

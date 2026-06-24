@@ -172,6 +172,12 @@ Two optional fields control output size per model endpoint:
   endpoint so the model can load local images. Default: `false`. The model must
   actually support image inputs; setting this on a text-only endpoint just gives
   the model a tool whose results it can't interpret.
+- **`cache_prompts`** — boolean. When `true`, Klimt stamps prompt-cache
+  breakpoints on the most stable prefixes (system prompt, tool schemas, and
+  the history prefix) so the provider can reuse them across turns. Default:
+  `true`. Only honored by `anthropic` (native OAuth path) and `bedrock`;
+  silently ignored everywhere else. Reported as `cacheRead` / `cacheWrite` in
+  the per-turn usage dict.
 
 `thinking_budget_tokens` only takes effect on the native Anthropic OAuth path
 (i.e. when `api_key_env` is omitted) and on Bedrock endpoints that do not use

@@ -35,6 +35,7 @@ class ModelConfig:
     thinking_budget_tokens: int = 0
     adaptive_thinking: bool = False
     vision: bool = False
+    cache_prompts: bool = True
     classes: tuple[str, ...] = ()
 
     def provider_model(self) -> str:
@@ -80,6 +81,10 @@ def _item_to_config(item: Any) -> ModelConfig | None:
 
     classes = _parse_classes(item.get("classes") or item.get("class"))
     vision = bool(item.get("vision"))
+    # Prompt caching defaults on. Providers that don't support it (OpenAI,
+    # Azure, Ollama) silently ignore the field via _supports_cache_breakpoints.
+    cache_prompts_raw = item.get("cache_prompts")
+    cache_prompts = True if cache_prompts_raw is None else bool(cache_prompts_raw)
 
     return ModelConfig(
         name=name,
@@ -94,6 +99,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         thinking_budget_tokens=max(0, thinking_budget_tokens),
         adaptive_thinking=bool(item.get("adaptive_thinking")),
         vision=vision,
+        cache_prompts=cache_prompts,
         classes=classes,
     )
 

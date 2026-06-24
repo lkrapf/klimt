@@ -15,7 +15,15 @@ from klimt.providers import (
 
 
 def test_bedrock_request_splits_system_and_maps_tools():
-    cfg = ModelConfig(name="br", provider="bedrock", model="anthropic.claude", region="us-east-1")
+    # cache_prompts=False keeps the request minimal so the structural shape is
+    # easy to assert. Cache-point stamping has its own test.
+    cfg = ModelConfig(
+        name="br",
+        provider="bedrock",
+        model="anthropic.claude",
+        region="us-east-1",
+        cache_prompts=False,
+    )
     request = _bedrock_request(
         cfg,
         [
@@ -48,6 +56,48 @@ def test_bedrock_request_splits_system_and_maps_tools():
             }],
         },
     }
+
+
+def test_bedrock_request_stamps_cache_points_by_default():
+    cfg = ModelConfig(name="br", provider="bedrock", model="anthropic.claude")
+    request = _bedrock_request(
+        cfg,
+        [
+            {"role": "system", "content": "sys"},
+            {"role": "user", "content": "hi"},
+        ],
+        [{
+            "type": "function",
+            "function": {
+                "name": "read",
+                "description": "Read file",
+                "parameters": {"type": "object"},
+            },
+        }],
+        100,
+    )
+
+    assert request["system"][-1] == {"cachePoint": {"type": "default"}}
+    assert request["toolConfig"]["tools"][-1] == {"cachePoint": {"type": "default"}}
+    assert request["messages"][-1]["content"][-1] == {"cachePoint": {"type": "default"}}
+
+
+def test_bedrock_request_omits_cache_points_when_disabled():
+    cfg = ModelConfig(
+        name="br",
+        provider="bedrock",
+        model="anthropic.claude",
+        cache_prompts=False,
+    )
+    request = _bedrock_request(
+        cfg,
+        [{"role": "system", "content": "sys"}, {"role": "user", "content": "hi"}],
+        [],
+        100,
+    )
+
+    serialized = json.dumps(request)
+    assert "cachePoint" not in serialized
 
 
 def test_bedrock_request_thinking_budget_sets_additional_fields():

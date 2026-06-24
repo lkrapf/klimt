@@ -353,10 +353,13 @@ def _usage_dict(usage: Any) -> Dict[str, int]:
     """Normalize OpenAI usage into the small shape we persist."""
     details = getattr(usage, "prompt_tokens_details", None)
     cached = getattr(details, "cached_tokens", 0) if details else 0
+    # Cache writes only surface from providers that expose prompt caching
+    # (Anthropic native + Bedrock). For others this stays 0.
+    cache_write = getattr(details, "cache_write_tokens", 0) if details else 0
     return {
         "input": int(getattr(usage, "prompt_tokens", 0) or 0),
         "output": int(getattr(usage, "completion_tokens", 0) or 0),
         "cacheRead": int(cached or 0),
-        "cacheWrite": 0,
+        "cacheWrite": int(cache_write or 0),
         "totalTokens": int(getattr(usage, "total_tokens", 0) or 0),
     }
