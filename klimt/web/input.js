@@ -1,4 +1,4 @@
-import { acceptVisibleCompletion, cancelCompletion, completeAtCursor } from "./completion.js";
+import { acceptVisibleCompletion, cancelCompletion, completeAtCursor, cycleCompletionBackward } from "./completion.js";
 import { setQueueCount, setWorking as setWorkingStatus } from "./status.js";
 import { activeTab, activeId, activateTab, addTab, allTabs, closeTab as closeLocalTab, updateTab } from "./tabs.js";
 import { addMessage, addPending, finalizeStreaming, useTranscript } from "./transcript.js";
@@ -232,11 +232,15 @@ export function installInputHandlers(klimt) {
       return;
     }
 
-    if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
-      if (cancelCompletion()) {
+    if (e.key === "Tab" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      if (cycleCompletionBackward()) {
         e.preventDefault();
         return;
       }
+    }
+
+    if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      e.preventDefault();
     }
 
     if (e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
@@ -282,6 +286,10 @@ export function installInputHandlers(klimt) {
     }
 
     if (e.key === "Escape" && !e.metaKey && !e.ctrlKey && !e.altKey && !e.shiftKey) {
+      if (cancelCompletion()) {
+        e.preventDefault();
+        return;
+      }
       e.preventDefault();
       e.stopPropagation();
       if (activeTab().working) {

@@ -81,9 +81,10 @@ function sameRequest(text, cursor) {
   return state && state.text === text && state.cursor === cursor;
 }
 
-function cycleCompletion() {
+function cycleCompletion(reverse = false) {
   if (!state?.items?.length) return false;
-  state.index = (state.index + 1) % state.items.length;
+  const n = state.items.length;
+  state.index = (state.index + (reverse ? n - 1 : 1)) % n;
   renderPopup();
   return true;
 }
@@ -91,6 +92,11 @@ function cycleCompletion() {
 export function acceptVisibleCompletion() {
   if (!popup || !state?.items?.length) return false;
   return acceptCompletion();
+}
+
+export function cycleCompletionBackward() {
+  if (!popup || !state?.items?.length) return false;
+  return cycleCompletion(true);
 }
 
 export function cancelCompletion() {
@@ -104,7 +110,7 @@ export async function completeAtCursor(tabId) {
   const cursor = input.selectionStart ?? text.length;
   if (input.selectionEnd !== cursor) return false;
 
-  if (sameRequest(text, cursor) && cycleCompletion()) return true;
+  if (sameRequest(text, cursor) && cycleCompletion(false)) return true;
 
   const id = ++requestId;
   let result;
