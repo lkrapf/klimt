@@ -494,7 +494,7 @@ body.hide-reasoning .msg.reasoning { display: none; }
 }
 .completion-item:last-child { border-bottom: 0; }
 .completion-item.active,
-.completion-item:hover { color: var(--hot); background: #00000055; }
+.completion-popup.mouse .completion-item:hover { color: var(--hot); background: #00000055; }
 
 /* ── Streaming cursor ── */
 .msg.streaming .body::after {

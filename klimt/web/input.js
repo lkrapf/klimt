@@ -1,7 +1,7 @@
 import { acceptVisibleCompletion, cancelCompletion, completeAtCursor, cycleCompletionBackward } from "./completion.js";
 import { setQueueCount, setWorking as setWorkingStatus } from "./status.js";
 import { activeTab, activeId, activateTab, addTab, allTabs, closeTab as closeLocalTab, updateTab } from "./tabs.js";
-import { addMessage, addPending, finalizeStreaming, useTranscript } from "./transcript.js";
+import { addMessage, addPending, finalizeStreaming, scrollToBottom, useTranscript } from "./transcript.js";
 import { clearAttachments, getPendingAttachments, installAttachmentHandlers } from "./attachments.js";
 
 const input = document.getElementById("input");
@@ -114,6 +114,7 @@ function queueCommand(tab, text, echo) {
   useTranscript(tab.id);
   if (echo) addMessage("user", text, { markdown: false });
   const pending = addPending("queued");
+  scrollToBottom({ force: true });
   tab.queue.push({ text, echo: false, pending });
   if (tab.id === activeId()) setQueueCount(tab.queue.length);
   return true;
@@ -158,6 +159,7 @@ export async function submitCommand(klimt, text, { echo = true, tab = activeTab(
     }
   }
   tab.pending = addPending(text.startsWith("!") ? "running" : "thinking");
+  scrollToBottom({ force: true });
 
   try {
     const res = await window.pywebview.api.send(text, tab.id, attachments.length ? attachments : null);

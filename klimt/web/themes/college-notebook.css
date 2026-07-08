@@ -226,7 +226,7 @@ body::before {
 }
 
 .completion-item.active,
-.completion-item:hover {
+.completion-popup.mouse .completion-item:hover {
   color: var(--hot);
   background: #e9f3ff;
 }

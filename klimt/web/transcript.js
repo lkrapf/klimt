@@ -22,9 +22,34 @@ export function appendToTranscript(node) {
   transcript().appendChild(node);
 }
 
-export function scrollToBottom() {
+// Per-transcript autoscroll stickiness. If the user scrolls away from the
+// bottom, streaming updates stop yanking the viewport back. Once they scroll
+// (or we force-scroll) back within the threshold, stickiness re-engages.
+const NEAR_BOTTOM_PX = 40;
+const stickyState = new WeakMap();
+
+function stateFor(el) {
+  let s = stickyState.get(el);
+  if (s) return s;
+  s = { sticky: true };
+  stickyState.set(el, s);
+  el.addEventListener(
+    "scroll",
+    () => {
+      const dist = el.scrollHeight - el.scrollTop - el.clientHeight;
+      s.sticky = dist <= NEAR_BOTTOM_PX;
+    },
+    { passive: true },
+  );
+  return s;
+}
+
+export function scrollToBottom({ force = false } = {}) {
   const el = transcript();
+  const s = stateFor(el);
+  if (!force && !s.sticky) return;
   el.scrollTop = el.scrollHeight;
+  s.sticky = true;
 }
 
 export function clearTranscript() {

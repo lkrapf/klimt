@@ -33,6 +33,11 @@ function ensurePopup() {
   popup = document.createElement("div");
   popup.className = "completion-popup";
   popup.setAttribute("role", "listbox");
+  // Start in keyboard mode: ignore stale hover state until the user
+  // actually moves the mouse over the popup. Otherwise a row that
+  // happens to sit under the cursor when the popup opens gets stuck
+  // with :hover styling that mimics the active selection.
+  popup.addEventListener("mousemove", () => popup?.classList.add("mouse"));
   document.body.appendChild(popup);
   return popup;
 }
@@ -66,6 +71,11 @@ function renderPopup() {
     el.appendChild(row);
   }
   positionPopup();
+  // Keep the active row on screen as the user Tabs through a popup
+  // taller than its max-height (otherwise the selection scrolls off
+  // while the popup viewport stays fixed).
+  const active = el.children[state.index];
+  if (active) active.scrollIntoView({ block: "nearest" });
 }
 
 function acceptCompletion(index = state?.index || 0) {
@@ -85,6 +95,7 @@ function cycleCompletion(reverse = false) {
   if (!state?.items?.length) return false;
   const n = state.items.length;
   state.index = (state.index + (reverse ? n - 1 : 1)) % n;
+  popup?.classList.remove("mouse");
   renderPopup();
   return true;
 }

@@ -207,7 +207,7 @@ html, body {
 }
 
 .completion-item.active,
-.completion-item:hover {
+.completion-popup.mouse .completion-item:hover {
   color: var(--fg);
   background: #3c4841;
 }
