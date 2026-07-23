@@ -18,6 +18,13 @@ from typing import Any
 DEFAULT_MAX_TURNS = 20
 DEFAULT_MAX_SECONDS = 600
 
+# A transient error (dropped connection, 5xx, timeout) on a single turn should
+# not kill an unattended loop. Retry the turn up to this many consecutive times,
+# backing off between attempts. The counter resets after any turn that streams
+# without raising, so only a sustained outage stops the goal.
+MAX_CONSECUTIVE_ERRORS = 4
+RETRY_BACKOFF_SECONDS = (2, 5, 15, 30)
+
 # Model classes tried, in order, to find a cheap evaluator. Falls back to the
 # session model when none are configured.
 EVALUATOR_CLASSES = ("fast", "cheap", "haiku")

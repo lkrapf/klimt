@@ -8,19 +8,31 @@ from __future__ import annotations
 
 from typing import Any
 
+import threading
+
+from klimt import goal as goal_mod
 from klimt.goal import Goal
 from klimt.tab_api import _SingleTabApi
 
 
 class FakeSession:
-    def __init__(self, verdicts: list[tuple[bool, str]]) -> None:
+    def __init__(self, verdicts: list[tuple[bool, str]], fail_turns: set[int] | None = None) -> None:
         self.goal: Goal | None = None
         self.history: list[dict[str, Any]] = []
         self._verdicts = list(verdicts)
         self.streamed: list[str] = []
         self.persisted = 0
+        self._fail_turns = set(fail_turns or ())
+        self._attempt = 0
+        self._cancel = threading.Event()
 
     def stream(self, text: str, emit, attachments=None) -> None:
+        self._attempt += 1
+        # stream appends the directive as a user message before running, mirroring
+        # the real ChatSession; a failing turn raises after that append.
+        self.history.append({"role": "user", "content": text})
+        if self._attempt in self._fail_turns:
+            raise ConnectionResetError("[Errno 54] Connection reset by peer")
         self.streamed.append(text)
         self.history.append({"role": "assistant", "content": f"worked on: {text}"})
 
@@ -84,6 +96,57 @@ def test_goal_worker_breaks_on_generation_change() -> None:
 
     # Stale worker must not drive any turns.
     assert session.streamed == []
+
+
+def test_goal_worker_retries_transient_error_and_continues(monkeypatch) -> None:
+    monkeypatch.setattr(goal_mod, "RETRY_BACKOFF_SECONDS", (0, 0, 0, 0))
+    # turn 1 raises, retry (turn 2) succeeds, evaluator then says met.
+    session = FakeSession(verdicts=[(True, "done")], fail_turns={1})
+    session.goal = Goal(condition="survive a blip", max_turns=10)
+    tab, events = _tab(session)
+
+    tab._goal_worker(session, generation=1)
+
+    assert session.streamed == ["survive a blip"]  # one successful turn
+    assert session.goal is None  # reached completion despite the error
+    assert any("Retry 1/" in t for t in _texts(events))
+    # failed turn's dangling user message was rolled back; history has the
+    # retry's user + assistant only.
+    assert session.history == [
+        {"role": "user", "content": "survive a blip"},
+        {"role": "assistant", "content": "worked on: survive a blip"},
+    ]
+
+
+def test_goal_worker_gives_up_after_consecutive_errors(monkeypatch) -> None:
+    monkeypatch.setattr(goal_mod, "RETRY_BACKOFF_SECONDS", (0, 0, 0, 0))
+    monkeypatch.setattr(goal_mod, "MAX_CONSECUTIVE_ERRORS", 3)
+    # every turn fails.
+    session = FakeSession(verdicts=[], fail_turns={1, 2, 3, 4, 5})
+    session.goal = Goal(condition="never works", max_turns=10)
+    tab, events = _tab(session)
+
+    tab._goal_worker(session, generation=1)
+
+    assert session.streamed == []
+    assert session.goal is not None  # stays active for the user to retry
+    assert any("goal paused after 3 consecutive errors" in t for t in _texts(events))
+
+
+def test_goal_worker_error_counter_resets_on_good_turn(monkeypatch) -> None:
+    monkeypatch.setattr(goal_mod, "RETRY_BACKOFF_SECONDS", (0, 0, 0, 0))
+    monkeypatch.setattr(goal_mod, "MAX_CONSECUTIVE_ERRORS", 2)
+    # fail, ok, fail, ok(met): with cap=2, two isolated failures would trip the
+    # cap if the counter did NOT reset on the good turn between them.
+    session = FakeSession(verdicts=[(False, "keep going"), (True, "done")], fail_turns={1, 3})
+    session.goal = Goal(condition="flaky net", max_turns=10)
+    tab, events = _tab(session)
+
+    tab._goal_worker(session, generation=1)
+
+    assert len(session.streamed) == 2  # two good turns
+    assert session.goal is None
+    assert not any("paused" in t for t in _texts(events))
 
 
 def test_goal_worker_uses_continuation_directive_after_first_turn() -> None:

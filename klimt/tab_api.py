@@ -372,24 +372,61 @@ class _SingleTabApi:
         worker.start()
         return True
 
+    def _cancellable_sleep(self, session: ChatSession, seconds: float, generation: int) -> bool:
+        """Sleep up to `seconds`, waking early if the goal is interrupted.
+
+        Returns True if the loop should stop (interrupted / superseded). Waits on
+        the captured session's cancel event: interrupt() calls abandon() on this
+        same session, so Esc breaks the backoff promptly even though it installs
+        a fresh session on the tab.
+        """
+        interrupted = session._cancel.wait(timeout=seconds)
+        return interrupted or generation != self._generation
+
     def _goal_worker(self, session: ChatSession, generation: int) -> None:
         """Drive turns until the goal condition holds or the budget runs out.
 
         The generation check makes Esc (interrupt) break the loop: interrupt
         bumps _generation and installs a fresh session, so a stale worker stops
         emitting and stops driving. The turn/time budget is a hard ceiling,
-        enforced here regardless of what the evaluator says.
+        enforced here regardless of what the evaluator says. A transient turn
+        failure is retried with backoff so a network blip doesn't kill the loop.
         """
         emit = lambda event: self._emit_current(generation, event)
         goal = session.goal
+        errors = 0
         try:
             directive = goal.initial_directive()
             while True:
                 if generation != self._generation or session.goal is None:
                     return
-                session.stream(directive, emit)
+                # Snapshot the history boundary so a failed turn can be rolled
+                # back cleanly: session.stream appends the directive as a user
+                # message before running, and run_turn re-raises without
+                # appending the assistant entry, leaving a dangling message.
+                pre_turn = len(session.history)
+                try:
+                    session.stream(directive, emit)
+                except Exception as e:  # noqa: BLE001
+                    # A transient turn failure (dropped connection, 5xx, timeout)
+                    # must not kill an unattended loop. Retry with backoff; only
+                    # give up after MAX_CONSECUTIVE_ERRORS in a row.
+                    if generation != self._generation or session.goal is None:
+                        return
+                    del session.history[pre_turn:]
+                    errors += 1
+                    if errors >= goal_mod.MAX_CONSECUTIVE_ERRORS:
+                        emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
+                        emit({"type": "text", "content": f"_goal paused after {errors} consecutive errors. Still active — retry with any message, or `/goal clear`._"})
+                        return
+                    delay = goal_mod.RETRY_BACKOFF_SECONDS[min(errors - 1, len(goal_mod.RETRY_BACKOFF_SECONDS) - 1)]
+                    emit({"type": "text", "content": f"_goal turn failed ({type(e).__name__}): {presenters.md_escape(str(e))}. Retry {errors}/{goal_mod.MAX_CONSECUTIVE_ERRORS} in {delay}s._"})
+                    if self._cancellable_sleep(session, delay, generation):
+                        return
+                    continue
                 if generation != self._generation or session.goal is None:
                     return
+                errors = 0
                 goal.turns += 1
 
                 met, reason = session.evaluate_goal()
