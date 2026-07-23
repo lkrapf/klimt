@@ -19,7 +19,7 @@ import webbrowser
 from urllib.parse import urlparse
 from typing import Any
 
-from . import __version__, command_handlers, commands, completion, compaction, goal as goal_mod, skills, themes, tools
+from . import __version__, command_handlers, commands, completion, compaction, goal as goal_mod, presenters, skills, themes, tools
 from .api import ChatSession
 from .goal import Goal
 from .model_config import list_model_names
