@@ -19,8 +19,9 @@ import webbrowser
 from urllib.parse import urlparse
 from typing import Any
 
-from . import __version__, command_handlers, commands, completion, compaction, skills, themes, tools
+from . import __version__, command_handlers, commands, completion, compaction, goal as goal_mod, skills, themes, tools
 from .api import ChatSession
+from .goal import Goal
 from .model_config import list_model_names
 from .session_factory import new_session
 from .tool_impl import visual as _visual
@@ -149,6 +150,11 @@ class _SingleTabApi:
                         daemon=True,
                     ).start()
                     return {"ok": True}
+                if spec.name == "/goal":
+                    goal_arg = command[len("/goal"):].strip()
+                    if goal_arg and goal_arg.lower() not in goal_mod.CLEAR_ALIASES:
+                        background = self._start_goal(goal_arg)
+                        return {"ok": background}
                 handled = self._handle_command(command, spec)
                 if handled:
                     return {"ok": True}
@@ -318,6 +324,90 @@ class _SingleTabApi:
             session.stream(text, emit, attachments=attachments)
             if generation == self._generation:
                 self._sync_input_history()
+        except Exception as e:  # noqa: BLE001
+            emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
+        finally:
+            finish = False
+            with self._busy_lock:
+                if generation == self._generation:
+                    self._busy = False
+                    self._active_base = None
+                    finish = True
+            if finish:
+                self._done()
+
+    def _start_goal(self, arg: str) -> bool:
+        """Set a goal and start driving turns toward it. Returns True if a worker
+        started (caller must then skip _done). False means an error was emitted."""
+        condition, max_turns = goal_mod.parse_max_turns(arg)
+        if not condition:
+            self._emit({"type": "text", "content": presenters.goal_status_markdown(None)})
+            return False
+        if len(condition) > goal_mod.CONDITION_MAX_CHARS:
+            self._emit({"type": "error", "message": f"goal condition too long (max {goal_mod.CONDITION_MAX_CHARS} chars)"})
+            return False
+
+        with self._busy_lock:
+            if self._busy:
+                self._emit({"type": "error", "message": "session is still busy; press Esc to interrupt"})
+                return False
+            self._busy = True
+            self._generation += 1
+            generation = self._generation
+            session = self._session
+            self._active_base = len(session.history)
+
+        session.goal = Goal(condition=condition, max_turns=max_turns)
+        session.remember_input(f"/goal {arg}")
+        session.persist()
+        self._sync_input_history()
+        self._emit({"type": "text", "content": presenters.goal_status_markdown(session.goal)})
+
+        worker = threading.Thread(
+            target=self._goal_worker,
+            args=(session, generation),
+            daemon=True,
+        )
+        self._worker = worker
+        worker.start()
+        return True
+
+    def _goal_worker(self, session: ChatSession, generation: int) -> None:
+        """Drive turns until the goal condition holds or the budget runs out.
+
+        The generation check makes Esc (interrupt) break the loop: interrupt
+        bumps _generation and installs a fresh session, so a stale worker stops
+        emitting and stops driving. The turn/time budget is a hard ceiling,
+        enforced here regardless of what the evaluator says.
+        """
+        emit = lambda event: self._emit_current(generation, event)
+        goal = session.goal
+        try:
+            directive = goal.initial_directive()
+            while True:
+                if generation != self._generation or session.goal is None:
+                    return
+                session.stream(directive, emit)
+                if generation != self._generation or session.goal is None:
+                    return
+                goal.turns += 1
+
+                met, reason = session.evaluate_goal()
+                goal.last_reason = reason
+                session.persist()
+                if met:
+                    goal.achieved = True
+                    emit({"type": "text", "content": presenters.goal_status_markdown(goal)})
+                    session.goal = None
+                    session.persist()
+                    return
+
+                exhausted, why = goal.budget_exhausted()
+                emit({"type": "text", "content": f"_goal check {goal.turns}/{goal.max_turns}: {presenters.md_escape(reason)}_"})
+                if exhausted:
+                    emit({"type": "text", "content": f"_goal stopped: {why}. Still active — clear with `/goal clear` or continue manually._"})
+                    return
+                directive = goal.continuation_directive()
         except Exception as e:  # noqa: BLE001
             emit({"type": "error", "message": f"{type(e).__name__}: {e}"})
         finally:

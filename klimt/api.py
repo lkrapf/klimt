@@ -19,7 +19,9 @@ import copy
 from . import agent_runner, agents as agents_mod, tools as tools_mod
 from . import compaction as compaction_mod
 from . import context_usage as context_usage_mod
+from . import goal as goal_mod
 from .api_types import Emit
+from .goal import Goal
 from .model_config import ModelConfig, list_model_classes, list_model_names, resolve_model_config
 from .providers import ChatProvider
 from .runner import run_turn, dispatch_one as _dispatch_one_direct
@@ -42,7 +44,9 @@ class ChatSession:
     # no-op so casual scratch tabs never litter the session store.
     kept: bool = False
     store: SessionStore = field(default_factory=SessionStore, repr=False)
+    goal: Goal | None = None
     _provider: ChatProvider = field(default=None, init=False, repr=False)
+    _evaluator: ChatProvider | None = field(default=None, init=False, repr=False)
     _cancel: threading.Event = field(default_factory=threading.Event, repr=False)
     _active_stream_ref: Dict[str, Any] = field(default_factory=lambda: {"stream": None}, init=False, repr=False)
     _active_lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
@@ -75,7 +79,8 @@ class ChatSession:
     def persist(self) -> None:
         if self._abandoned or not self.kept:
             return
-        self.store.save(self.session_name, self.history, self.input_history, self.model, self.cwd)
+        goal = self.goal.to_dict() if self.goal else None
+        self.store.save(self.session_name, self.history, self.input_history, self.model, self.cwd, goal=goal)
 
     def keep(self, name: str | None = None) -> None:
         """Promote an in-memory session to the on-disk store.
@@ -112,6 +117,9 @@ class ChatSession:
         self.kept = True
         self.history = data.get("history") or []
         self.input_history = data.get("input_history") or []
+        # A goal that was active at save time carries over; timer/turn counters
+        # reset because from_dict starts them fresh.
+        self.goal = Goal.from_dict(data.get("goal") or {})
         saved_model = (data.get("model") or "").strip()
         saved_cwd = (data.get("cwd") or "").strip()
         if saved_cwd:
@@ -240,6 +248,34 @@ class ChatSession:
         config = self.model_config()
         self.max_tokens = config.max_completion_tokens or 4096
         self._provider = ChatProvider(config)
+        self._evaluator = None
+
+    def _evaluator_provider(self) -> ChatProvider:
+        """Cheap provider for goal evaluation; a class match or the session model."""
+        if self._evaluator is not None:
+            return self._evaluator
+        for cls in goal_mod.EVALUATOR_CLASSES:
+            try:
+                config = resolve_model_config(cls)
+            except (KeyError, RuntimeError):
+                continue
+            if config.name != self.model:
+                self._evaluator = ChatProvider(config)
+                return self._evaluator
+        self._evaluator = self._provider
+        return self._evaluator
+
+    def evaluate_goal(self) -> tuple[bool, str]:
+        """Evaluate the active goal against recent history. Returns (met, reason)."""
+        if self.goal is None:
+            return False, "no goal"
+        transcript = goal_mod.recent_transcript(self.history)
+        return goal_mod.evaluate(
+            self._evaluator_provider(),
+            self.goal.condition,
+            transcript,
+            self.max_tokens,
+        )
 
     def _tool_schemas(self) -> list[dict[str, Any]]:
         # Always include all tool schemas in the API call. For non-vision

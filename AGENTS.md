@@ -98,8 +98,35 @@ Handled before any model call:
 - `/sessions ...` — lists/resumes/deletes/clears sessions for this folder.
 - `/save [name]` — saves the session to disk, optionally under a new name.
 - `/reload` — reloads prompt layers, skills, tools, model config, and CSS.
+- `/goal [turns=N] [condition|clear]` — goal-directed autonomy. Sets a
+  completion condition and re-drives turns until a cheap evaluator model
+  confirms it, or a hard turn/time budget is hit. No arg shows status; `clear`
+  (and aliases stop/off/reset/none/cancel) stops it. See `## Goals` below.
 - `/quit` — exits immediately.
 - `/<skill>` — loads `~/.klimt/skills/<skill>/SKILL.md` into history.
+
+## Goals
+
+`/goal` keeps the session working toward a condition without per-turn prompting.
+Mechanics live in `klimt/goal.py` (the `Goal` dataclass, transcript rendering,
+and the evaluator) plus a driver in `tab_api._goal_worker`.
+
+- Setting a goal (`/goal <condition>`) is intercepted in `_SingleTabApi.send`
+  because it must start a driving turn; status and `clear` go through the normal
+  `command_handlers.goal_status` handler.
+- After each turn the driver calls `ChatSession.evaluate_goal`, which asks a
+  cheap evaluator provider (first `fast`/`cheap`/`haiku` model class that isn't
+  the session model, else the session model) for a YES/NO + reason over the
+  recent transcript. The evaluator does not run tools; it judges only what the
+  transcript shows.
+- The loop is bounded by a hard turn/time budget enforced in `Goal`, not by the
+  evaluator. This matters: `bash` is unsandboxed, so an unattended goal loop is
+  full-shell autonomy. Budget is the safety mechanism. Default 20 turns / 600s;
+  cap turns with a leading `turns=N` clause.
+- Esc breaks the loop the same way it interrupts a normal turn: `interrupt()`
+  bumps `_generation`, and `_goal_worker` checks generation before each turn.
+- An active goal is persisted (`session_store` `goal` key) and restored on
+  resume; the timer and turn counter reset on restore.
 
 ## Skills
 

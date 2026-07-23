@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-from . import agents, commands, presenters, prompt, skills, themes, tools
+from . import agents, commands, goal as goal_mod, presenters, prompt, skills, themes, tools
 from .api import ChatSession
 from .model_config import list_model_classes, list_model_configs
 from .session_factory import build_system_prompt, new_session
@@ -263,6 +263,23 @@ def back(ctx: CommandContext, arg: str) -> None:
     ctx.emit({"type": "text", "content": presenters.back_markdown(turns)})
 
 
+def goal_status(ctx: CommandContext, arg: str) -> None:
+    """Handle `/goal` status and `/goal clear`. Setting a goal is done by the tab
+    (it must start a driving turn), so this handler never sets one."""
+    session = ctx.session
+    token = arg.strip().lower()
+    if token in goal_mod.CLEAR_ALIASES:
+        cleared = session.goal
+        session.goal = None
+        session.persist()
+        if cleared is None:
+            ctx.emit({"type": "text", "content": "_no goal set_"})
+        else:
+            ctx.emit({"type": "text", "content": f"goal cleared: {presenters.md_escape(cleared.condition)}"})
+        return
+    ctx.emit({"type": "text", "content": presenters.goal_status_markdown(session.goal)})
+
+
 def load_skill(ctx: CommandContext, name: str) -> None:
     """Fallback handler for `/<skill>`. Loads the named skill into history."""
     for e in commands.load_skill(ctx.session, name):
@@ -337,6 +354,7 @@ HANDLERS: dict[str, tuple[Handler, int]] = {
     "/reload": (reload_, len("/reload")),
     "/quit": (quit_, len("/quit")),
     "/back": (back, len("/back")),
+    "/goal": (goal_status, len("/goal")),
 }
 
 

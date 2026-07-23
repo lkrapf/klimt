@@ -25,6 +25,7 @@ class FakeSession:
     input_history: list[str] = field(default_factory=list)
     persisted: int = 0
     interrupted: int = 0
+    goal: Any = None
 
     def persist(self) -> None:
         self.persisted += 1
@@ -166,6 +167,44 @@ def test_sessions_with_saved_sessions_sets_pending(monkeypatch: pytest.MonkeyPat
     command_handlers.sessions(ctx, "")
     assert ctx.pending_sessions == items
     assert "my-session" in _text_events(ctx.events)[-1]
+
+
+def test_goal_status_no_goal() -> None:
+    ctx = FakeCtx()
+    command_handlers.goal_status(ctx, "")
+    assert "no goal set" in _text_events(ctx.events)[-1]
+
+
+def test_goal_status_active() -> None:
+    from klimt.goal import Goal
+    ctx = FakeCtx()
+    ctx.session.goal = Goal(condition="all tests pass")
+    command_handlers.goal_status(ctx, "")
+    txt = _text_events(ctx.events)[-1]
+    assert "Goal active" in txt
+    assert "all tests pass" in txt
+
+
+def test_goal_clear_removes_goal() -> None:
+    from klimt.goal import Goal
+    ctx = FakeCtx()
+    ctx.session.goal = Goal(condition="do the thing")
+    command_handlers.goal_status(ctx, "clear")
+    assert ctx.session.goal is None
+    assert "goal cleared" in _text_events(ctx.events)[-1]
+    assert ctx.session.persisted >= 1
+
+
+def test_goal_clear_when_none_set() -> None:
+    ctx = FakeCtx()
+    command_handlers.goal_status(ctx, "stop")
+    assert "no goal set" in _text_events(ctx.events)[-1]
+
+
+def test_goal_routes_status_via_dispatch() -> None:
+    ctx = FakeCtx()
+    assert command_handlers.dispatch(ctx, "/goal") is True
+    assert "no goal set" in _text_events(ctx.events)[-1]
 
 
 def test_save_renames_when_arg_given() -> None:

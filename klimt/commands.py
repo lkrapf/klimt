@@ -25,6 +25,7 @@ SPECS: tuple[CommandSpec, ...] = (
     CommandSpec("/skills", "/skills", "List available skills with short descriptions.", "allow"),
     CommandSpec("/agents", "/agents", "List available subagents (built-in, user, and project).", "allow"),
     CommandSpec("/back", "/back", "Go back to an earlier turn in the conversation. Presents a list to choose from."),
+    CommandSpec("/goal", "/goal [turns=N] [condition|clear]", "Keep working until a condition is met. No arg shows status; `clear` stops. Optional `turns=N` caps the loop (default 20).", "allow"),
     CommandSpec("/compact", "/compact [N]", "Compact older context, keeping the last N history messages raw. Default: 8."),
     CommandSpec("/cd", "/cd [path]", "Show or change the current working directory for this session."),
     CommandSpec("/model", "/model [name]", "Show or switch the model endpoint for this session. Choices come from `~/.klimt/models.json`."),

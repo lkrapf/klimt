@@ -73,6 +73,34 @@ def agents_markdown(items: Iterable[Agent], model_classes: list[str]) -> str:
     return "\n".join(lines)
 
 
+def goal_status_markdown(goal: Any) -> str:
+    if goal is None:
+        return (
+            "_no goal set_\n\n"
+            "_usage: `/goal <condition>` to start, `/goal clear` to stop. "
+            "Add `turns=N` to cap the loop._"
+        )
+    condition = md_escape(goal.condition)
+    if getattr(goal, "achieved", False):
+        return "\n".join([
+            "## Goal achieved",
+            "",
+            f"- **condition:** {condition}",
+            f"- **turns:** {goal.turns}",
+            f"- **elapsed:** {int(goal.elapsed())}s",
+        ])
+    lines = [
+        "## Goal active",
+        "",
+        f"- **condition:** {condition}",
+        f"- **turns:** {goal.turns} / {goal.max_turns}",
+        f"- **elapsed:** {int(goal.elapsed())}s / {goal.max_seconds}s",
+    ]
+    if goal.last_reason:
+        lines.append(f"- **last check:** {md_escape(goal.last_reason)}")
+    return "\n".join(lines)
+
+
 def sessions_markdown(sessions: list[dict[str, Any]]) -> str:
     if not sessions:
         return "_no saved sessions for this folder_"

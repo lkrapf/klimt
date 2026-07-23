@@ -100,3 +100,26 @@ def test_load_session_marks_kept(store):
     assert other.kept is False
     assert other.load_session("on-disk") is True
     assert other.kept is True
+
+
+def test_active_goal_persists_and_restores(store):
+    from klimt.goal import Goal
+    s = _session(store)
+    s.keep("with-goal")
+    s.goal = Goal(condition="all tests pass", max_turns=9)
+    s.persist()
+
+    other = _session(store, name="scratch")
+    assert other.load_session("with-goal") is True
+    assert other.goal is not None
+    assert other.goal.condition == "all tests pass"
+    assert other.goal.max_turns == 9
+
+
+def test_no_goal_is_not_persisted(store):
+    s = _session(store)
+    s.keep("no-goal")
+    s.persist()
+    loaded = store.load("no-goal")
+    assert loaded is not None
+    assert "goal" not in loaded

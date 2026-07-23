@@ -88,6 +88,7 @@ class SessionStore:
         input_history: List[str],
         model: str | None = None,
         cwd: str | None = None,
+        goal: Dict[str, Any] | None = None,
     ) -> None:
         name = (name or DEFAULT_SESSION).strip() or DEFAULT_SESSION
         self.root.mkdir(parents=True, exist_ok=True)
@@ -100,6 +101,8 @@ class SessionStore:
             "model": model,
             "cwd": cwd or self.folder,
         }
+        if goal:
+            payload["goal"] = goal
         tmp = self._path(name).with_suffix(".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         tmp.replace(self._path(name))
