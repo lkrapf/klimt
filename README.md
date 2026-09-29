@@ -3,7 +3,8 @@
 Klimt is a small local LLM harness with a native `pywebview` window, streaming
 Markdown UI, persistent sessions, prompt layering, skills, and model tool calls.
 It supports Azure OpenAI, OpenAI, OpenAI-compatible endpoints, Ollama,
-Anthropic through Anthropic's OpenAI-compatible endpoint, and AWS Bedrock.
+Anthropic through Anthropic's OpenAI-compatible endpoint, AWS Bedrock, and
+GitHub Copilot.
 
 Klimt is heavily inspired by the fantastic [pi harness](https://pi.dev).
 
@@ -115,6 +116,12 @@ set, the first listed model wins.
       "region": "us-east-1",
       "context_window": 200000,
       "max_completion_tokens": 16000
+    },
+    {
+      "name": "copilot-gpt",
+      "provider": "copilot",
+      "model": "gpt-4.1",
+      "context_window": 128000
     }
   ]
 }
@@ -127,6 +134,7 @@ Supported `provider` values are:
 - `ollama`
 - `anthropic`
 - `bedrock`
+- `copilot`
 
 Do not put secret values in `models.json`; put the environment variable name in
 `api_key_env` for API-key based providers. Authenticated providers
@@ -152,12 +160,38 @@ OAuth token files are written with mode `0600`. Do not use Claude web session
 cookies; Klimt only supports API/OAuth-style credentials through Anthropic's API
 endpoint.
 
+`copilot` also has two modes:
+
+- With `api_key_env`, Klimt sends the configured token directly as the
+  `Authorization` bearer against `https://api.githubcopilot.com` (useful for a
+  pre-minted Copilot token or a proxy).
+- Without `api_key_env`, Klimt performs GitHub's OAuth device-code login: it
+  prints a `https://github.com/login/device` URL and one-time code to the
+  terminal, posts the same prompt into the chat window (GitHub's device flow
+  has no autofill, so the code must be typed in manually), opens the browser
+  automatically, exchanges the resulting GitHub token for a short-lived
+  Copilot API token via `api.github.com/copilot_internal/v2/token`, stores
+  both in `~/.klimt/copilot-oauth.json`, and refreshes the Copilot token
+  automatically when it nears expiry. Requires an active GitHub Copilot
+  subscription.
+
+Some newer OpenAI-family models on Copilot (e.g. the GPT-5.6/6 line) are only
+served via OpenAI's Responses API, not `/chat/completions` — Copilot's
+`/chat/completions` endpoint rejects them with `unsupported_api_for_model`.
+Set `"responses_api": true` on a `copilot` model entry to route it through
+`client.responses.create(...)` instead. Check a model's
+`supported_endpoints` in `GET https://api.githubcopilot.com/models` (with
+header `Copilot-Integration-Id: vscode-chat`) if you're unsure which mode a
+given model needs.
+
 ### Token limits
 
 Two optional fields control output size per model endpoint:
 
 - **`max_completion_tokens`** — maximum tokens the model may generate in a
-  single response. Default: `4096`. Accepts `max_tokens` as an alias.
+  single response. Default: `4096`. Accepts `max_tokens` as an alias. If a
+  response hits this limit, Klimt shows an error and does not run tool calls
+  from that incomplete response.
 - **`thinking_budget_tokens`** — reasoning token budget for Anthropic extended
   thinking. Default: `0` (disabled). Accepts `thinking_budget` as an alias.
   Must be strictly less than `max_completion_tokens`. Ignored when
@@ -406,6 +440,7 @@ klimt/
   runner.py         # streaming model/tool turn loop
   providers.py      # provider adapter around OpenAI-compatible clients
   anthropic_oauth.py# Anthropic OAuth Authorization Code + PKCE flow
+  copilot_oauth.py  # GitHub Copilot OAuth device-code flow
   model_config.py   # ~/.klimt/models.json parsing
   commands.py       # slash/bang command metadata and handling helpers
   completion.py     # Tab-completion for commands, paths, models, sessions
@@ -431,4 +466,3 @@ During the call, Python pushes events into the page via
 | `tool` | tool call box with name, args, and result |
 | `error` | error surfaced to the transcript |
 | `done` | request/command finished |
-

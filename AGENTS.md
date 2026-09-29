@@ -21,14 +21,22 @@ Project-local guidance for AI assistants working on this repo.
 ## Model providers
 
 - Config is read from `~/.klimt/models.json` by `model_config.py`.
-- Supported providers: `azure`, `openai`, `ollama`, `anthropic`.
+- Supported providers: `azure`, `openai`, `ollama`, `anthropic`, `bedrock`, `copilot`.
 - Do not add inline keys or provider-specific auth env fallbacks. API-key based
-  providers use `api_key_env`; Anthropic may omit it to use native OAuth PKCE.
+  providers use `api_key_env`; Anthropic may omit it to use native OAuth PKCE;
+  Copilot may omit it to use native GitHub device-code OAuth.
 - No Azure env-only fallback; endpoint config must be in `~/.klimt/models.json`.
 - The value sent as `model` is provider-specific. For Azure it is the deployment
   name, not the public model name.
 - We use `max_completion_tokens`, not `max_tokens`.
 - We do not send `temperature` or `top_p`.
+- Copilot models on the newer OpenAI GPT-5.6/6 line are only reachable via
+  OpenAI's Responses API (`/responses`), not `/chat/completions`. Mark those
+  model entries with `"responses_api": true`; the `copilot` provider then
+  calls `client.responses.create(...)` (still the same `OpenAI()` client,
+  same base URL/headers) instead of `client.chat.completions.create(...)`.
+  Don't auto-detect/retry across endpoints — this is explicit config per the
+  no-speculative-fallback rule above.
 
 ## Known model gotchas
 
