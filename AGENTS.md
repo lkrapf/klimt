@@ -30,6 +30,13 @@ Project-local guidance for AI assistants working on this repo.
   name, not the public model name.
 - We use `max_completion_tokens`, not `max_tokens`.
 - We do not send `temperature` or `top_p`.
+- Copilot models on the newer OpenAI GPT-5.6/6 line are only reachable via
+  OpenAI's Responses API (`/responses`), not `/chat/completions`. Mark those
+  model entries with `"responses_api": true`; the `copilot` provider then
+  calls `client.responses.create(...)` (still the same `OpenAI()` client,
+  same base URL/headers) instead of `client.chat.completions.create(...)`.
+  Don't auto-detect/retry across endpoints — this is explicit config per the
+  no-speculative-fallback rule above.
 
 ## Known model gotchas
 

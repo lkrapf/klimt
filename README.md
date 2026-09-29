@@ -175,6 +175,15 @@ endpoint.
   automatically when it nears expiry. Requires an active GitHub Copilot
   subscription.
 
+Some newer OpenAI-family models on Copilot (e.g. the GPT-5.6/6 line) are only
+served via OpenAI's Responses API, not `/chat/completions` — Copilot's
+`/chat/completions` endpoint rejects them with `unsupported_api_for_model`.
+Set `"responses_api": true` on a `copilot` model entry to route it through
+`client.responses.create(...)` instead. Check a model's
+`supported_endpoints` in `GET https://api.githubcopilot.com/models` (with
+header `Copilot-Integration-Id: vscode-chat`) if you're unsure which mode a
+given model needs.
+
 ### Token limits
 
 Two optional fields control output size per model endpoint:

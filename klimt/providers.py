@@ -97,6 +97,8 @@ class ChatProvider:
             )
         if self._copilot_oauth:
             client = self._make_client(self.config, copilot_oauth.access_token(_on_copilot_device_code(emit)))
+            if self.config.responses_api:
+                return _copilot_responses_complete(client, self.config, messages, max_completion_tokens)
             return client.chat.completions.create(
                 model=self.provider_model(),
                 messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -104,6 +106,8 @@ class ChatProvider:
             )
         if self._bedrock:
             return _bedrock_complete(self.config, self.client, messages, max_completion_tokens)
+        if self.config.provider == "copilot" and self.config.responses_api:
+            return _copilot_responses_complete(self.client, self.config, messages, max_completion_tokens)
         return self.client.chat.completions.create(
             model=self.provider_model(),
             messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -127,6 +131,8 @@ class ChatProvider:
             )
         if self._copilot_oauth:
             client = self._make_client(self.config, copilot_oauth.access_token(_on_copilot_device_code(emit)))
+            if self.config.responses_api:
+                return _CopilotResponsesStream(client, self.config, messages, tool_schemas, max_completion_tokens)
             return client.chat.completions.create(
                 model=self.provider_model(),
                 messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -137,6 +143,8 @@ class ChatProvider:
             )
         if self._bedrock:
             return _BedrockStream(self.config, self.client, messages, tool_schemas, max_completion_tokens)
+        if self.config.provider == "copilot" and self.config.responses_api:
+            return _CopilotResponsesStream(self.client, self.config, messages, tool_schemas, max_completion_tokens)
         return self.client.chat.completions.create(
             model=self.provider_model(),
             messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -166,6 +174,209 @@ def _on_copilot_device_code(emit: Emit | None) -> copilot_oauth.OnDeviceCode | N
         })
 
     return _on_device_code
+
+
+def _copilot_responses_tools(tool_schemas: list[dict[str, Any]] | None) -> list[dict[str, Any]]:
+    """Flatten chat-completions tool schemas into Responses API shape."""
+    out: list[dict[str, Any]] = []
+    for schema in tool_schemas or []:
+        fn = schema.get("function") or {}
+        out.append({
+            "type": "function",
+            "name": fn.get("name") or "",
+            "description": fn.get("description") or "",
+            "parameters": fn.get("parameters") or {"type": "object", "properties": {}},
+        })
+    return out
+
+
+def _copilot_responses_image_content(placeholder: str, envelope: dict[str, Any]) -> list[dict[str, Any]]:
+    media_type = envelope.get("media_type") or "image/png"
+    data = envelope.get("data") or ""
+    return [
+        {"type": "input_text", "text": placeholder},
+        {"type": "input_image", "image_url": f"data:{media_type};base64,{data}"},
+    ]
+
+
+def _copilot_responses_items(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Translate one canonical Klimt message into Responses API input items."""
+    role = msg.get("role")
+    if role == "tool":
+        call_id = str(msg.get("tool_call_id") or "")
+        envelope = _visual.parse_envelope(msg.get("content"))
+        if envelope is not None:
+            placeholder = _visual.envelope_summary(envelope)
+            return [
+                {"type": "function_call_output", "call_id": call_id, "output": placeholder},
+                {"role": "user", "content": _copilot_responses_image_content(placeholder, envelope)},
+            ]
+        return [{
+            "type": "function_call_output",
+            "call_id": call_id,
+            "output": str(msg.get("content") or ""),
+        }]
+    if role == "assistant":
+        items: list[dict[str, Any]] = []
+        content = msg.get("content")
+        if content:
+            items.append({"role": "assistant", "content": str(content)})
+        for tool_call in msg.get("tool_calls") or []:
+            fn = tool_call.get("function") or {}
+            items.append({
+                "type": "function_call",
+                "call_id": str(tool_call.get("id") or ""),
+                "name": str(fn.get("name") or ""),
+                "arguments": str(fn.get("arguments") or "{}"),
+            })
+        return items
+    # user (and any other) roles: plain text or a visual-tool image envelope.
+    envelope = _visual.parse_envelope(msg.get("content"))
+    if envelope is not None:
+        placeholder = _visual.envelope_summary(envelope)
+        return [{"role": "user", "content": _copilot_responses_image_content(placeholder, envelope)}]
+    return [{"role": role or "user", "content": str(msg.get("content") or "")}]
+
+
+def _copilot_responses_kwargs(
+    config: ModelConfig,
+    messages: list[dict[str, Any]],
+    tool_schemas: list[dict[str, Any]] | None,
+    max_completion_tokens: int,
+) -> dict[str, Any]:
+    """Build `client.responses.create(...)` kwargs from canonical Klimt history.
+
+    The system message becomes the top-level `instructions` string; everything
+    else is flattened into `input` items (see `_copilot_responses_items`).
+    """
+    instructions = ""
+    input_items: list[dict[str, Any]] = []
+    for msg in messages:
+        if msg.get("role") == "system":
+            if not instructions:
+                instructions = str(msg.get("content") or "")
+            continue
+        input_items.extend(_copilot_responses_items(msg))
+
+    kwargs: dict[str, Any] = {
+        "model": config.provider_model(),
+        "input": input_items,
+        "max_output_tokens": max_completion_tokens,
+    }
+    if instructions:
+        kwargs["instructions"] = instructions
+    tools = _copilot_responses_tools(tool_schemas)
+    if tools:
+        kwargs["tools"] = tools
+    return kwargs
+
+
+def _copilot_responses_usage(usage: Any) -> Any:
+    if usage is None:
+        return None
+    input_tokens = int(getattr(usage, "input_tokens", 0) or 0)
+    output_tokens = int(getattr(usage, "output_tokens", 0) or 0)
+    input_details = getattr(usage, "input_tokens_details", None)
+    cached_tokens = int(getattr(input_details, "cached_tokens", 0) or 0) if input_details else 0
+    cache_write_tokens = int(getattr(input_details, "cache_write_tokens", 0) or 0) if input_details else 0
+    total_tokens = int(getattr(usage, "total_tokens", 0) or (input_tokens + output_tokens))
+    return SimpleNamespace(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=total_tokens,
+        prompt_tokens_details=SimpleNamespace(
+            cached_tokens=cached_tokens,
+            cache_write_tokens=cache_write_tokens,
+        ),
+    )
+
+
+def _copilot_responses_complete(
+    client: Any,
+    config: ModelConfig,
+    messages: list[dict[str, Any]],
+    max_completion_tokens: int,
+) -> Any:
+    """Non-streaming Responses API call, used only by compaction."""
+    kwargs = _copilot_responses_kwargs(config, messages, None, max_completion_tokens)
+    response = client.responses.create(**kwargs)
+    text = getattr(response, "output_text", "") or ""
+    return SimpleNamespace(
+        choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
+        usage=_copilot_responses_usage(getattr(response, "usage", None)),
+    )
+
+
+def _copilot_responses_error_message(event: Any) -> str:
+    response = getattr(event, "response", None)
+    error = getattr(response, "error", None) if response is not None else getattr(event, "error", None)
+    if error is not None:
+        message = getattr(error, "message", None)
+        if message:
+            return str(message)
+    return str(getattr(event, "message", None) or event)
+
+
+class _CopilotResponsesStream:
+    """Adapts `client.responses.create(..., stream=True)` to Klimt's chunk protocol."""
+
+    def __init__(
+        self,
+        client: Any,
+        config: ModelConfig,
+        messages: list[dict[str, Any]],
+        tool_schemas: list[dict[str, Any]],
+        max_completion_tokens: int,
+    ) -> None:
+        kwargs = _copilot_responses_kwargs(config, messages, tool_schemas, max_completion_tokens)
+        self._stream = client.responses.create(**kwargs, stream=True)
+        self._items: Dict[int, dict[str, Any]] = {}
+        self._next_index = 0
+        self._saw_tool_call = False
+
+    def close(self) -> None:
+        self._stream.close()
+
+    def __iter__(self) -> Iterator[Any]:
+        for event in self._stream:
+            _debug_provider_event("copilot", {"type": event.type})
+            yield from self._on_event(event)
+
+    def _on_event(self, event: Any) -> Iterator[Any]:
+        etype = event.type
+        if etype == "response.output_text.delta":
+            yield _chunk(content=event.delta or "")
+        elif etype == "response.reasoning_summary_text.delta":
+            yield _chunk(reasoning=event.delta or "")
+        elif etype == "response.output_item.added":
+            item = event.item
+            if getattr(item, "type", None) == "function_call":
+                call_id = str(getattr(item, "call_id", "") or "")
+                name = str(getattr(item, "name", "") or "")
+                if not call_id or not name:
+                    raise RuntimeError("Copilot Responses API sent a malformed function_call item")
+                output_index = event.output_index
+                index = self._next_index
+                self._next_index += 1
+                self._items[output_index] = {"index": index}
+                self._saw_tool_call = True
+                yield _chunk(tool_calls=[_tool_delta(index=index, tool_id=call_id, name=name)])
+        elif etype == "response.function_call_arguments.delta":
+            slot = self._items.get(event.output_index)
+            if slot is None:
+                raise RuntimeError(
+                    f"Copilot Responses API sent function-call arguments for unknown item {event.output_index}"
+                )
+            yield _chunk(tool_calls=[_tool_delta(index=slot["index"], arguments=event.delta or "")])
+        elif etype in {"response.incomplete", "response.completed"}:
+            usage = _copilot_responses_usage(getattr(event.response, "usage", None))
+            if etype == "response.incomplete":
+                finish_reason = "tool_calls" if self._saw_tool_call else "length"
+            else:
+                finish_reason = "tool_calls" if self._saw_tool_call else "stop"
+            yield SimpleNamespace(choices=[], usage=usage, finish_reason=finish_reason)
+        elif etype in {"response.failed", "error"}:
+            raise RuntimeError(f"Copilot Responses API error: {_copilot_responses_error_message(event)}")
 
 
 def _chat_completions_sanitize_messages(

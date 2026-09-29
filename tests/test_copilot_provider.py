@@ -1,5 +1,17 @@
+import base64
+import json
+from types import SimpleNamespace
+
 from klimt.model_config import ModelConfig
-from klimt.providers import ChatProvider
+from klimt.providers import (
+    ChatProvider,
+    _copilot_responses_complete,
+    _copilot_responses_items,
+    _copilot_responses_kwargs,
+    _copilot_responses_tools,
+    _copilot_responses_usage,
+    _CopilotResponsesStream,
+)
 
 
 def _fake_openai_client():
@@ -113,3 +125,312 @@ def test_copilot_oauth_without_emit_passes_no_device_code_callback(monkeypatch):
     provider.complete([{"role": "user", "content": "hi"}], 100)
 
     assert seen["cb"] is None
+
+
+def _envelope():
+    return {
+        "_klimt_image": True,
+        "media_type": "image/png",
+        "data": base64.b64encode(b"fake-bytes").decode("ascii"),
+        "path": "/tmp/shot.png",
+        "bytes": 10,
+    }
+
+
+def test_copilot_responses_tools_flattens_function_schema():
+    schemas = [{
+        "type": "function",
+        "function": {
+            "name": "multiply",
+            "description": "Multiply two integers",
+            "parameters": {"type": "object", "properties": {"a": {"type": "integer"}}},
+        },
+    }]
+
+    tools = _copilot_responses_tools(schemas)
+
+    assert tools == [{
+        "type": "function",
+        "name": "multiply",
+        "description": "Multiply two integers",
+        "parameters": {"type": "object", "properties": {"a": {"type": "integer"}}},
+    }]
+
+
+def test_copilot_responses_items_user_text():
+    assert _copilot_responses_items({"role": "user", "content": "hi"}) == [
+        {"role": "user", "content": "hi"}
+    ]
+
+
+def test_copilot_responses_items_user_image_envelope():
+    items = _copilot_responses_items({"role": "user", "content": json.dumps(_envelope())})
+
+    assert len(items) == 1
+    assert items[0]["role"] == "user"
+    parts = items[0]["content"]
+    assert parts[0]["type"] == "input_text"
+    assert "shot.png" in parts[0]["text"]
+    assert parts[1] == {
+        "type": "input_image",
+        "image_url": f"data:image/png;base64,{base64.b64encode(b'fake-bytes').decode('ascii')}",
+    }
+
+
+def test_copilot_responses_items_assistant_text_and_tool_calls():
+    msg = {
+        "role": "assistant",
+        "content": "checking",
+        "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "multiply", "arguments": '{"a":1,"b":2}'},
+        }],
+    }
+
+    items = _copilot_responses_items(msg)
+
+    assert items == [
+        {"role": "assistant", "content": "checking"},
+        {"type": "function_call", "call_id": "call_1", "name": "multiply", "arguments": '{"a":1,"b":2}'},
+    ]
+
+
+def test_copilot_responses_items_tool_result():
+    items = _copilot_responses_items({"role": "tool", "tool_call_id": "call_1", "content": "42"})
+
+    assert items == [{"type": "function_call_output", "call_id": "call_1", "output": "42"}]
+
+
+def test_copilot_responses_items_tool_result_with_image_envelope():
+    items = _copilot_responses_items({
+        "role": "tool",
+        "tool_call_id": "call_1",
+        "content": json.dumps(_envelope()),
+    })
+
+    assert len(items) == 2
+    assert items[0]["type"] == "function_call_output"
+    assert items[0]["call_id"] == "call_1"
+    assert items[1]["role"] == "user"
+
+
+def test_copilot_responses_kwargs_maps_system_to_instructions_and_tokens():
+    messages = [
+        {"role": "system", "content": "be terse"},
+        {"role": "user", "content": "hi"},
+    ]
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    kwargs = _copilot_responses_kwargs(cfg, messages, None, 123)
+
+    assert kwargs["model"] == "gpt-5.6-sol"
+    assert kwargs["instructions"] == "be terse"
+    assert kwargs["input"] == [{"role": "user", "content": "hi"}]
+    assert kwargs["max_output_tokens"] == 123
+    assert "tools" not in kwargs
+
+
+def test_copilot_responses_usage_maps_fields():
+    usage = SimpleNamespace(
+        input_tokens=10,
+        output_tokens=5,
+        total_tokens=15,
+        input_tokens_details=SimpleNamespace(cached_tokens=2, cache_write_tokens=1),
+    )
+
+    mapped = _copilot_responses_usage(usage)
+
+    assert mapped.prompt_tokens == 10
+    assert mapped.completion_tokens == 5
+    assert mapped.total_tokens == 15
+    assert mapped.prompt_tokens_details.cached_tokens == 2
+    assert mapped.prompt_tokens_details.cache_write_tokens == 1
+
+
+class _FakeResponsesClient:
+    def __init__(self, events=None, response=None):
+        self._events = events or []
+        self._response = response
+        self.captured_kwargs = None
+
+    class _Responses:
+        def __init__(self, outer):
+            self._outer = outer
+
+        def create(self, **kwargs):
+            self._outer.captured_kwargs = kwargs
+            if kwargs.get("stream"):
+                return iter(self._outer._events)
+            return self._outer._response
+
+    @property
+    def responses(self):
+        return self._Responses(self)
+
+
+def test_copilot_responses_complete_returns_text_and_usage():
+    response = SimpleNamespace(
+        output_text="the answer is 42",
+        usage=SimpleNamespace(
+            input_tokens=1, output_tokens=2, total_tokens=3,
+            input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+        ),
+    )
+    client = _FakeResponsesClient(response=response)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    result = _copilot_responses_complete(client, cfg, [{"role": "user", "content": "hi"}], 50)
+
+    assert result.choices[0].message.content == "the answer is 42"
+    assert result.usage.total_tokens == 3
+
+
+def test_copilot_responses_stream_text_and_usage():
+    events = [
+        SimpleNamespace(type="response.created"),
+        SimpleNamespace(type="response.output_text.delta", delta="Hel"),
+        SimpleNamespace(type="response.output_text.delta", delta="lo"),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(usage=SimpleNamespace(
+                input_tokens=5, output_tokens=2, total_tokens=7,
+                input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+            )),
+        ),
+    ]
+    client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    stream = _CopilotResponsesStream(client, cfg, [{"role": "user", "content": "hi"}], [], 50)
+    text = ""
+    finish_reason = None
+    usage = None
+    for chunk in stream:
+        if chunk.choices and chunk.choices[0].delta.content:
+            text += chunk.choices[0].delta.content
+        if getattr(chunk, "finish_reason", None):
+            finish_reason = chunk.finish_reason
+            usage = chunk.usage
+
+    assert text == "Hello"
+    assert finish_reason == "stop"
+    assert usage.total_tokens == 7
+
+
+def test_copilot_responses_stream_tool_call_round_trip():
+    events = [
+        SimpleNamespace(
+            type="response.output_item.added",
+            output_index=0,
+            item=SimpleNamespace(type="function_call", call_id="call_1", name="multiply"),
+        ),
+        SimpleNamespace(type="response.function_call_arguments.delta", output_index=0, delta='{"a":1'),
+        SimpleNamespace(type="response.function_call_arguments.delta", output_index=0, delta=',"b":2}'),
+        SimpleNamespace(type="response.function_call_arguments.done", output_index=0, arguments='{"a":1,"b":2}'),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(usage=SimpleNamespace(
+                input_tokens=1, output_tokens=1, total_tokens=2,
+                input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+            )),
+        ),
+    ]
+    client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+    tool_schemas = [{"type": "function", "function": {"name": "multiply", "parameters": {}}}]
+
+    stream = _CopilotResponsesStream(client, cfg, [{"role": "user", "content": "hi"}], tool_schemas, 50)
+    tool_id = None
+    name = None
+    arguments = ""
+    finish_reason = None
+    for chunk in stream:
+        for tc in (chunk.choices[0].delta.tool_calls if chunk.choices else []):
+            if tc.id:
+                tool_id = tc.id
+            if tc.function.name:
+                name = tc.function.name
+            if tc.function.arguments:
+                arguments += tc.function.arguments
+        if getattr(chunk, "finish_reason", None):
+            finish_reason = chunk.finish_reason
+
+    assert tool_id == "call_1"
+    assert name == "multiply"
+    assert arguments == '{"a":1,"b":2}'
+    assert finish_reason == "tool_calls"
+
+
+def test_copilot_responses_stream_incomplete_maps_to_length():
+    events = [
+        SimpleNamespace(
+            type="response.incomplete",
+            response=SimpleNamespace(usage=SimpleNamespace(
+                input_tokens=1, output_tokens=1, total_tokens=2,
+                input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+            )),
+        ),
+    ]
+    client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    finish_reasons = [
+        chunk.finish_reason
+        for chunk in _CopilotResponsesStream(client, cfg, [{"role": "user", "content": "hi"}], [], 50)
+        if getattr(chunk, "finish_reason", None)
+    ]
+
+    assert finish_reasons == ["length"]
+
+
+def test_copilot_responses_stream_failed_event_raises():
+    events = [
+        SimpleNamespace(
+            type="response.failed",
+            response=SimpleNamespace(error=SimpleNamespace(message="boom")),
+        ),
+    ]
+    client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    stream = _CopilotResponsesStream(client, cfg, [{"role": "user", "content": "hi"}], [], 50)
+    try:
+        list(stream)
+        assert False, "expected RuntimeError"
+    except RuntimeError as exc:
+        assert "boom" in str(exc)
+
+
+def test_copilot_provider_routes_to_responses_api_with_static_key(monkeypatch):
+    monkeypatch.setenv("COPILOT_TOKEN", "static-token")
+    events = [
+        SimpleNamespace(type="response.output_text.delta", delta="hi"),
+        SimpleNamespace(
+            type="response.completed",
+            response=SimpleNamespace(usage=SimpleNamespace(
+                input_tokens=1, output_tokens=1, total_tokens=2,
+                input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+            )),
+        ),
+    ]
+    fake_client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(
+        name="copilot-gpt",
+        provider="copilot",
+        model="gpt-5.6-sol",
+        api_key_env="COPILOT_TOKEN",
+        responses_api=True,
+    )
+    provider = ChatProvider(cfg)
+    provider.client = fake_client
+
+    stream = provider.stream([{"role": "user", "content": "hi"}], [], 50)
+
+    assert isinstance(stream, _CopilotResponsesStream)
+    text = "".join(
+        chunk.choices[0].delta.content or ""
+        for chunk in stream
+        if chunk.choices
+    )
+    assert text == "hi"

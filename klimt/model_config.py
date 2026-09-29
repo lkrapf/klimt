@@ -36,6 +36,7 @@ class ModelConfig:
     adaptive_thinking: bool = False
     vision: bool = False
     cache_prompts: bool = True
+    responses_api: bool = False
     classes: tuple[str, ...] = ()
 
     def provider_model(self) -> str:
@@ -100,6 +101,7 @@ def _item_to_config(item: Any) -> ModelConfig | None:
         adaptive_thinking=bool(item.get("adaptive_thinking")),
         vision=vision,
         cache_prompts=cache_prompts,
+        responses_api=bool(item.get("responses_api")),
         classes=classes,
     )
 
