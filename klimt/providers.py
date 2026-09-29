@@ -11,7 +11,7 @@ from typing import Any, Dict, Iterator
 
 from openai import AzureOpenAI, OpenAI
 
-from . import anthropic_oauth
+from . import anthropic_oauth, copilot_oauth
 from .model_config import ModelConfig, resolve_model_config
 from .tool_impl import visual as _visual
 
@@ -19,6 +19,12 @@ from .tool_impl import visual as _visual
 ANTHROPIC_VERSION = "2023-06-01"
 ANTHROPIC_OAUTH_BETA = "claude-code-20250219,oauth-2025-04-20"
 KLIMT_USER_AGENT = "Klimt/0.1"
+COPILOT_API_BASE = "https://api.githubcopilot.com"
+COPILOT_HEADERS = {
+    "Editor-Version": "Klimt/0.1",
+    "Editor-Plugin-Version": "klimt/0.1",
+    "Copilot-Integration-Id": "vscode-chat",
+}
 PROVIDER_DEBUG = bool(os.environ.get("KLIMT_PROVIDER_DEBUG"))
 
 
@@ -28,9 +34,11 @@ class ChatProvider:
     def __init__(self, config: ModelConfig) -> None:
         self.config = config
         self._anthropic_oauth = config.provider == "anthropic" and not config.api_key_env
+        self._copilot_oauth = config.provider == "copilot" and not config.api_key_env
         self._bedrock = config.provider == "bedrock"
-        self._api_key = "" if self._anthropic_oauth or self._bedrock else config.resolved_api_key()
-        self.client = None if self._anthropic_oauth else self._make_client(config, self._api_key)
+        oauth = self._anthropic_oauth or self._copilot_oauth
+        self._api_key = "" if oauth or self._bedrock else config.resolved_api_key()
+        self.client = None if oauth else self._make_client(config, self._api_key)
 
     @classmethod
     def resolve(cls, name: str) -> "ChatProvider":
@@ -56,6 +64,12 @@ class ChatProvider:
                 api_key=api_key,
                 base_url=config.base_url or "https://api.anthropic.com/v1",
             )
+        if config.provider == "copilot":
+            return OpenAI(
+                api_key=api_key,
+                base_url=config.base_url or COPILOT_API_BASE,
+                default_headers=COPILOT_HEADERS,
+            )
         if config.provider == "bedrock":
             import boto3
             return boto3.client("bedrock-runtime", region_name=config.region or None)
@@ -74,6 +88,13 @@ class ChatProvider:
                 anthropic_oauth.access_token(),
                 messages,
                 max_completion_tokens,
+            )
+        if self._copilot_oauth:
+            client = self._make_client(self.config, copilot_oauth.access_token())
+            return client.chat.completions.create(
+                model=self.provider_model(),
+                messages=_chat_completions_sanitize_messages(self.config.provider, messages),
+                max_completion_tokens=max_completion_tokens,
             )
         if self._bedrock:
             return _bedrock_complete(self.config, self.client, messages, max_completion_tokens)
@@ -96,6 +117,16 @@ class ChatProvider:
                 messages,
                 tool_schemas,
                 max_completion_tokens,
+            )
+        if self._copilot_oauth:
+            client = self._make_client(self.config, copilot_oauth.access_token())
+            return client.chat.completions.create(
+                model=self.provider_model(),
+                messages=_chat_completions_sanitize_messages(self.config.provider, messages),
+                tools=tool_schemas,
+                max_completion_tokens=max_completion_tokens,
+                stream=True,
+                stream_options={"include_usage": True},
             )
         if self._bedrock:
             return _BedrockStream(self.config, self.client, messages, tool_schemas, max_completion_tokens)

@@ -21,9 +21,10 @@ Project-local guidance for AI assistants working on this repo.
 ## Model providers
 
 - Config is read from `~/.klimt/models.json` by `model_config.py`.
-- Supported providers: `azure`, `openai`, `ollama`, `anthropic`.
+- Supported providers: `azure`, `openai`, `ollama`, `anthropic`, `bedrock`, `copilot`.
 - Do not add inline keys or provider-specific auth env fallbacks. API-key based
-  providers use `api_key_env`; Anthropic may omit it to use native OAuth PKCE.
+  providers use `api_key_env`; Anthropic may omit it to use native OAuth PKCE;
+  Copilot may omit it to use native GitHub device-code OAuth.
 - No Azure env-only fallback; endpoint config must be in `~/.klimt/models.json`.
 - The value sent as `model` is provider-specific. For Azure it is the deployment
   name, not the public model name.

@@ -3,7 +3,8 @@
 Klimt is a small local LLM harness with a native `pywebview` window, streaming
 Markdown UI, persistent sessions, prompt layering, skills, and model tool calls.
 It supports Azure OpenAI, OpenAI, OpenAI-compatible endpoints, Ollama,
-Anthropic through Anthropic's OpenAI-compatible endpoint, and AWS Bedrock.
+Anthropic through Anthropic's OpenAI-compatible endpoint, AWS Bedrock, and
+GitHub Copilot.
 
 Klimt is heavily inspired by the fantastic [pi harness](https://pi.dev).
 
@@ -115,6 +116,12 @@ set, the first listed model wins.
       "region": "us-east-1",
       "context_window": 200000,
       "max_completion_tokens": 16000
+    },
+    {
+      "name": "copilot-gpt",
+      "provider": "copilot",
+      "model": "gpt-4.1",
+      "context_window": 128000
     }
   ]
 }
@@ -127,6 +134,7 @@ Supported `provider` values are:
 - `ollama`
 - `anthropic`
 - `bedrock`
+- `copilot`
 
 Do not put secret values in `models.json`; put the environment variable name in
 `api_key_env` for API-key based providers. Authenticated providers
@@ -151,6 +159,18 @@ resolution applies.
 OAuth token files are written with mode `0600`. Do not use Claude web session
 cookies; Klimt only supports API/OAuth-style credentials through Anthropic's API
 endpoint.
+
+`copilot` also has two modes:
+
+- With `api_key_env`, Klimt sends the configured token directly as the
+  `Authorization` bearer against `https://api.githubcopilot.com` (useful for a
+  pre-minted Copilot token or a proxy).
+- Without `api_key_env`, Klimt performs GitHub's OAuth device-code login: it
+  prints a `https://github.com/login/device` URL and one-time code, exchanges
+  the resulting GitHub token for a short-lived Copilot API token via
+  `api.github.com/copilot_internal/v2/token`, stores both in
+  `~/.klimt/copilot-oauth.json`, and refreshes the Copilot token automatically
+  when it nears expiry. Requires an active GitHub Copilot subscription.
 
 ### Token limits
 
@@ -406,6 +426,7 @@ klimt/
   runner.py         # streaming model/tool turn loop
   providers.py      # provider adapter around OpenAI-compatible clients
   anthropic_oauth.py# Anthropic OAuth Authorization Code + PKCE flow
+  copilot_oauth.py  # GitHub Copilot OAuth device-code flow
   model_config.py   # ~/.klimt/models.json parsing
   commands.py       # slash/bang command metadata and handling helpers
   completion.py     # Tab-completion for commands, paths, models, sessions
