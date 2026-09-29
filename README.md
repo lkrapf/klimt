@@ -166,11 +166,14 @@ endpoint.
   `Authorization` bearer against `https://api.githubcopilot.com` (useful for a
   pre-minted Copilot token or a proxy).
 - Without `api_key_env`, Klimt performs GitHub's OAuth device-code login: it
-  prints a `https://github.com/login/device` URL and one-time code, exchanges
-  the resulting GitHub token for a short-lived Copilot API token via
-  `api.github.com/copilot_internal/v2/token`, stores both in
-  `~/.klimt/copilot-oauth.json`, and refreshes the Copilot token automatically
-  when it nears expiry. Requires an active GitHub Copilot subscription.
+  prints a `https://github.com/login/device` URL and one-time code to the
+  terminal, posts the same prompt into the chat window (GitHub's device flow
+  has no autofill, so the code must be typed in manually), opens the browser
+  automatically, exchanges the resulting GitHub token for a short-lived
+  Copilot API token via `api.github.com/copilot_internal/v2/token`, stores
+  both in `~/.klimt/copilot-oauth.json`, and refreshes the Copilot token
+  automatically when it nears expiry. Requires an active GitHub Copilot
+  subscription.
 
 ### Token limits
 

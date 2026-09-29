@@ -57,6 +57,7 @@ def run_turn(
             ],
             tool_schemas=tool_schemas if tool_schemas is not None else tools.SCHEMAS,
             max_completion_tokens=max_tokens,
+            emit=emit,
         )
         with active_lock:
             active_stream_ref["stream"] = stream

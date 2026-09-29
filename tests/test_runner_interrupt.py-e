@@ -79,7 +79,7 @@ class _ProviderScripted:
     def preserves_reasoning_blocks(self) -> bool:
         return False
 
-    def stream(self, *, messages, tool_schemas, max_completion_tokens, emit=None):
+    def stream(self, *, messages, tool_schemas, max_completion_tokens):
         def gen():
             for ch in self._chunks:
                 yield ch
@@ -250,7 +250,7 @@ def test_interrupted_field_not_sent_to_provider():
     captured: list[list[dict]] = []
 
     class _Capture(_ProviderScripted):
-        def stream(self, *, messages, tool_schemas, max_completion_tokens, emit=None):
+        def stream(self, *, messages, tool_schemas, max_completion_tokens):
             captured.append(messages)
             return super().stream(
                 messages=messages,

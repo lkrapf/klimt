@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterator
 from openai import AzureOpenAI, OpenAI
 
 from . import anthropic_oauth, copilot_oauth
+from .api_types import Emit
 from .model_config import ModelConfig, resolve_model_config
 from .tool_impl import visual as _visual
 
@@ -81,7 +82,12 @@ class ChatProvider:
     def preserves_reasoning_blocks(self) -> bool:
         return self._anthropic_oauth or self._bedrock
 
-    def complete(self, messages: list[dict[str, Any]], max_completion_tokens: int) -> Any:
+    def complete(
+        self,
+        messages: list[dict[str, Any]],
+        max_completion_tokens: int,
+        emit: Emit | None = None,
+    ) -> Any:
         if self._anthropic_oauth:
             return _anthropic_oauth_complete(
                 self.config,
@@ -90,7 +96,7 @@ class ChatProvider:
                 max_completion_tokens,
             )
         if self._copilot_oauth:
-            client = self._make_client(self.config, copilot_oauth.access_token())
+            client = self._make_client(self.config, copilot_oauth.access_token(_on_copilot_device_code(emit)))
             return client.chat.completions.create(
                 model=self.provider_model(),
                 messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -109,6 +115,7 @@ class ChatProvider:
         messages: list[dict[str, Any]],
         tool_schemas: list[dict[str, Any]],
         max_completion_tokens: int,
+        emit: Emit | None = None,
     ) -> Any:
         if self._anthropic_oauth:
             return _AnthropicOAuthStream(
@@ -119,7 +126,7 @@ class ChatProvider:
                 max_completion_tokens,
             )
         if self._copilot_oauth:
-            client = self._make_client(self.config, copilot_oauth.access_token())
+            client = self._make_client(self.config, copilot_oauth.access_token(_on_copilot_device_code(emit)))
             return client.chat.completions.create(
                 model=self.provider_model(),
                 messages=_chat_completions_sanitize_messages(self.config.provider, messages),
@@ -138,6 +145,27 @@ class ChatProvider:
             stream=True,
             stream_options={"include_usage": True},
         )
+
+
+def _on_copilot_device_code(emit: Emit | None) -> copilot_oauth.OnDeviceCode | None:
+    """Build a device-code callback that surfaces the login prompt in chat.
+
+    Runs on a background worker thread; `emit` (backed by `evaluate_js`) is
+    safe to call from there.
+    """
+    if emit is None:
+        return None
+
+    def _on_device_code(verification_uri: str, user_code: str) -> None:
+        emit({
+            "type": "text",
+            "content": (
+                "**GitHub Copilot sign-in required.**\n\n"
+                f"Open [{verification_uri}]({verification_uri}) and enter code `{user_code}`."
+            ),
+        })
+
+    return _on_device_code
 
 
 def _chat_completions_sanitize_messages(

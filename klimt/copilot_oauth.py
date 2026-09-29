@@ -17,7 +17,9 @@ import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
+
+OnDeviceCode = Callable[[str, str], None]
 
 CLIENT_ID = "Iv1.b507a08c87ecfe98"
 DEVICE_CODE_URL = "https://github.com/login/device/code"
@@ -66,8 +68,13 @@ class _FileLock:
         self._fh = None
 
 
-def access_token() -> str:
-    """Return a valid Copilot API token, exchanging or logging in as needed."""
+def access_token(on_device_code: OnDeviceCode | None = None) -> str:
+    """Return a valid Copilot API token, exchanging or logging in as needed.
+
+    `on_device_code`, if given, is called with `(verification_uri, user_code)`
+    when an interactive device-code login is required, so a caller can surface
+    the prompt somewhere other than the terminal (e.g. the chat window).
+    """
     with _FileLock(LOCK_PATH):
         data = _load_store()
         if _valid(data):
@@ -85,7 +92,7 @@ def access_token() -> str:
                 _save_store(data)
                 return copilot_token
 
-        fresh = _login()
+        fresh = _login(on_device_code)
         _save_store(fresh)
         return str(fresh["copilot_token"])
 
@@ -113,7 +120,7 @@ def _save_store(data: dict[str, Any]) -> None:
         os.chmod(STORE_PATH, 0o600)
 
 
-def _login() -> dict[str, Any]:
+def _login(on_device_code: OnDeviceCode | None) -> dict[str, Any]:
     device = _request_device_code()
     verification_uri = str(device["verification_uri"])
     user_code = str(device["user_code"])
@@ -121,6 +128,9 @@ def _login() -> dict[str, Any]:
         f"GitHub Copilot login: open {verification_uri} and enter code {user_code}\n",
         flush=True,
     )
+    if on_device_code is not None:
+        with contextlib.suppress(Exception):
+            on_device_code(verification_uri, user_code)
     with contextlib.suppress(Exception):
         webbrowser.open(verification_uri)
 
