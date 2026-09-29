@@ -9,9 +9,10 @@ of Klimt imports. It owns:
 - The single dispatcher `run(name, args, cancel, cwd)` used by the parent
   and subagent runners.
 
-websearch supports two categories:
-  - ``web`` (default): titles, URLs, and snippets.
-  - ``images``: titles, direct image URLs, thumbnail URLs, and source pages.
+websearch is backed by the Tavily API and supports two categories:
+  - ``web`` (default): titles, URLs, and snippets (plus an optional answer).
+  - ``images``: descriptions and direct image URLs.
+Requires the ``TAVILY_API_KEY`` environment variable.
 """
 from __future__ import annotations
 
@@ -196,7 +197,7 @@ _SCHEMAS_RAW = [
         "type": "function",
         "function": {
             "name": "websearch",
-            "description": "Search the web with Startpage and return compact result titles, URLs, and snippets. Use category='images' to search for images instead; image results include direct image URLs and thumbnail URLs suitable for inline display.",
+            "description": "Search the web with Tavily and return compact result titles, URLs, and snippets. Use category='images' to search for images instead; image results include direct image URLs suitable for inline display.",
             "parameters": {
                 "type": "object",
                 "properties": {
