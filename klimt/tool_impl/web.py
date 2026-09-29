@@ -1,12 +1,18 @@
-"""HTTP-based tools: webfetch and websearch (web + images)."""
+"""HTTP-based tools: webfetch and websearch (web + images).
+
+Search is backed by the Tavily API (https://api.tavily.com), which returns
+clean JSON built for agent use. The key is read from the ``TAVILY_API_KEY``
+environment variable; no secret is stored in the tree.
+"""
 from __future__ import annotations
 
+import json
+import os
+import urllib.error
 import urllib.parse
 import urllib.request
 
 from .html_extract import (
-    StartpageHTMLParser,
-    StartpageImageParser,
     clean_text,
     html_to_text,
     is_html_content,
@@ -19,23 +25,45 @@ from .limits import (
     WEBSEARCH_MAX_RESULTS,
 )
 
+TAVILY_SEARCH_URL = "https://api.tavily.com/search"
 
-def _startpage_fetch(query: str, category: str) -> str:
-    """Fetch raw HTML from Startpage for the given query and category."""
-    url = "https://www.startpage.com/sp/search?" + urllib.parse.urlencode(
-        {"query": query, "cat": category}
-    )
+
+def _tavily_search(query: str, *, include_images: bool, max_results: int) -> dict:
+    """POST a query to the Tavily search API and return the parsed JSON.
+
+    Raises RuntimeError with a caller-friendly message on auth/HTTP errors.
+    """
+    api_key = os.environ.get("TAVILY_API_KEY", "").strip()
+    if not api_key:
+        raise RuntimeError("TAVILY_API_KEY is not set")
+
+    payload: dict = {"query": query, "max_results": max_results}
+    if include_images:
+        payload["include_images"] = True
+        payload["include_image_descriptions"] = True
+
     req = urllib.request.Request(
-        url,
+        TAVILY_SEARCH_URL,
+        data=json.dumps(payload).encode("utf-8"),
         headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-            "Accept": "text/html,application/xhtml+xml",
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
         },
+        method="POST",
     )
-    with urllib.request.urlopen(req, timeout=WEBFETCH_TIMEOUT) as r:  # noqa: S310
-        raw = r.read(WEBFETCH_MAX_BYTES)
-        charset = r.headers.get_content_charset() or "utf-8"
-    return raw.decode(charset, errors="replace")
+    try:
+        with urllib.request.urlopen(req, timeout=WEBFETCH_TIMEOUT) as r:  # noqa: S310
+            raw = r.read(WEBFETCH_MAX_BYTES)
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = e.read().decode("utf-8", errors="replace").strip()
+        except Exception:
+            pass
+        raise RuntimeError(f"Tavily HTTP {e.code}: {detail or e.reason}") from e
+    except urllib.error.URLError as e:
+        raise RuntimeError(f"Tavily request failed: {e.reason}") from e
+    return json.loads(raw.decode("utf-8", errors="replace"))
 
 
 def websearch(query: str, category: str = "web") -> str:
@@ -46,23 +74,32 @@ def websearch(query: str, category: str = "web") -> str:
     if category == "images":
         return _websearch_images(query)
 
-    html_text = _startpage_fetch(query, "web")
-    parser = StartpageHTMLParser()
-    parser.feed(html_text)
+    try:
+        data = _tavily_search(
+            query, include_images=False, max_results=WEBSEARCH_MAX_RESULTS
+        )
+    except RuntimeError as e:
+        return f"error: {e}"
+
     results = [
         {
             "title": clean_text(item.get("title", "")),
             "url": clean_text(item.get("url", "")),
-            "snippet": clean_text(item.get("snippet", "")),
+            "snippet": clean_text(item.get("content", "")),
         }
-        for item in parser.results
+        for item in data.get("results", [])
         if item.get("title") and item.get("url")
     ][:WEBSEARCH_MAX_RESULTS]
 
-    if not results:
+    answer = clean_text(data.get("answer") or "")
+
+    if not results and not answer:
         return f"no results for: {query}"
 
     lines = [f"query: {query}", ""]
+    if answer:
+        lines.append(f"answer: {answer}")
+        lines.append("")
     for i, item in enumerate(results, 1):
         lines.append(f"{i}. {item['title']}")
         lines.append(f"   {item['url']}")
@@ -73,18 +110,20 @@ def websearch(query: str, category: str = "web") -> str:
 
 
 def _websearch_images(query: str) -> str:
-    html_text = _startpage_fetch(query, "images")
-    parser = StartpageImageParser()
-    parser.feed(html_text)
+    try:
+        data = _tavily_search(
+            query, include_images=True, max_results=WEBSEARCH_MAX_RESULTS
+        )
+    except RuntimeError as e:
+        return f"error: {e}"
+
     results = [
         {
-            "title": clean_text(item.get("title", "")),
-            "image_url": clean_text(item.get("image_url", "")),
-            "thumbnail_url": clean_text(item.get("thumbnail_url", "")),
-            "source_url": clean_text(item.get("source_url", "")),
+            "title": clean_text(item.get("description") or item.get("title") or ""),
+            "image_url": clean_text(item.get("url", "")),
         }
-        for item in parser.results
-        if item.get("image_url")
+        for item in data.get("images", [])
+        if item.get("url")
     ][:WEBSEARCH_MAX_IMAGE_RESULTS]
 
     if not results:
@@ -92,11 +131,10 @@ def _websearch_images(query: str) -> str:
 
     lines = [f"query: {query}", ""]
     for i, item in enumerate(results, 1):
-        lines.append(f"{i}. {item['title']}")
+        title = item["title"] or "(no description)"
+        lines.append(f"{i}. {title}")
         lines.append(f"   image:     {item['image_url']}")
-        lines.append(f"   thumbnail: {item['thumbnail_url']}")
-        if item["source_url"]:
-            lines.append(f"   source:    {item['source_url']}")
+        lines.append(f"   thumbnail: {item['image_url']}")
         lines.append("")
     return "\n".join(lines).rstrip()
 
