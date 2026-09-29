@@ -189,7 +189,9 @@ given model needs.
 Two optional fields control output size per model endpoint:
 
 - **`max_completion_tokens`** — maximum tokens the model may generate in a
-  single response. Default: `4096`. Accepts `max_tokens` as an alias.
+  single response. Default: `4096`. Accepts `max_tokens` as an alias. If a
+  response hits this limit, Klimt shows an error and does not run tool calls
+  from that incomplete response.
 - **`thinking_budget_tokens`** — reasoning token budget for Anthropic extended
   thinking. Default: `0` (disabled). Accepts `thinking_budget` as an alias.
   Must be strictly less than `max_completion_tokens`. Ignored when
@@ -464,4 +466,3 @@ During the call, Python pushes events into the page via
 | `tool` | tool call box with name, args, and result |
 | `error` | error surfaced to the transcript |
 | `done` | request/command finished |
-

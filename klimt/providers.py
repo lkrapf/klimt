@@ -300,6 +300,15 @@ def _copilot_responses_complete(
     """Non-streaming Responses API call, used only by compaction."""
     kwargs = _copilot_responses_kwargs(config, messages, None, max_completion_tokens)
     response = client.responses.create(**kwargs)
+    if response.status != "completed":
+        details = getattr(response, "incomplete_details", None)
+        reason = getattr(details, "reason", None)
+        error = getattr(response, "error", None)
+        message = getattr(error, "message", None)
+        raise RuntimeError(
+            f"Copilot Responses API returned {response.status}: "
+            f"{message or reason or 'no details provided'}"
+        )
     text = getattr(response, "output_text", "") or ""
     return SimpleNamespace(
         choices=[SimpleNamespace(message=SimpleNamespace(content=text))],
@@ -371,7 +380,11 @@ class _CopilotResponsesStream:
         elif etype in {"response.incomplete", "response.completed"}:
             usage = _copilot_responses_usage(getattr(event.response, "usage", None))
             if etype == "response.incomplete":
-                finish_reason = "tool_calls" if self._saw_tool_call else "length"
+                details = getattr(event.response, "incomplete_details", None)
+                reason = getattr(details, "reason", None)
+                if reason != "max_output_tokens":
+                    raise RuntimeError(f"Copilot Responses API incomplete: {reason or 'no reason provided'}")
+                finish_reason = "length"
             else:
                 finish_reason = "tool_calls" if self._saw_tool_call else "stop"
             yield SimpleNamespace(choices=[], usage=usage, finish_reason=finish_reason)

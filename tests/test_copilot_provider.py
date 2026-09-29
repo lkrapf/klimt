@@ -2,6 +2,9 @@ import base64
 import json
 from types import SimpleNamespace
 
+import pytest
+
+from klimt.api import ChatSession
 from klimt.model_config import ModelConfig
 from klimt.providers import (
     ChatProvider,
@@ -271,6 +274,7 @@ class _FakeResponsesClient:
 
 def test_copilot_responses_complete_returns_text_and_usage():
     response = SimpleNamespace(
+        status="completed",
         output_text="the answer is 42",
         usage=SimpleNamespace(
             input_tokens=1, output_tokens=2, total_tokens=3,
@@ -284,6 +288,51 @@ def test_copilot_responses_complete_returns_text_and_usage():
 
     assert result.choices[0].message.content == "the answer is 42"
     assert result.usage.total_tokens == 3
+
+
+@pytest.mark.parametrize("status,reason", [
+    ("incomplete", "max_output_tokens"),
+    ("failed", "model unavailable"),
+])
+def test_copilot_responses_complete_rejects_noncompleted_result(status, reason):
+    response = SimpleNamespace(
+        status=status,
+        output_text="partial summary",
+        incomplete_details=SimpleNamespace(reason=reason) if status == "incomplete" else None,
+        error=SimpleNamespace(message=reason) if status == "failed" else None,
+    )
+    client = _FakeResponsesClient(response=response)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    with pytest.raises(RuntimeError, match=reason):
+        _copilot_responses_complete(client, cfg, [{"role": "user", "content": "hi"}], 50)
+
+
+def test_incomplete_copilot_compaction_preserves_history(monkeypatch):
+    monkeypatch.setenv("COPILOT_TOKEN", "static-token")
+    monkeypatch.setattr(ChatSession, "reload_client", lambda self: None)
+    cfg = ModelConfig(
+        name="copilot-gpt", provider="copilot", model="gpt-5.6-sol",
+        api_key_env="COPILOT_TOKEN", responses_api=True,
+    )
+    provider = ChatProvider(cfg)
+    provider.client = _FakeResponsesClient(response=SimpleNamespace(
+        status="incomplete",
+        output_text="partial summary",
+        incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+    ))
+    history = [
+        {"role": "user", "content": "old"},
+        {"role": "assistant", "content": "reply"},
+        {"role": "user", "content": "recent"},
+    ]
+    session = ChatSession(model="copilot-gpt", system="sys", history=history)
+    session._provider = provider
+
+    with pytest.raises(RuntimeError, match="max_output_tokens"):
+        session.compact(keep_recent=1)
+
+    assert session.history == history
 
 
 def test_copilot_responses_stream_text_and_usage():
@@ -366,10 +415,13 @@ def test_copilot_responses_stream_incomplete_maps_to_length():
     events = [
         SimpleNamespace(
             type="response.incomplete",
-            response=SimpleNamespace(usage=SimpleNamespace(
-                input_tokens=1, output_tokens=1, total_tokens=2,
-                input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
-            )),
+            response=SimpleNamespace(
+                incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+                usage=SimpleNamespace(
+                    input_tokens=1, output_tokens=1, total_tokens=2,
+                    input_tokens_details=SimpleNamespace(cached_tokens=0, cache_write_tokens=0),
+                ),
+            ),
         ),
     ]
     client = _FakeResponsesClient(events=events)
@@ -382,6 +434,47 @@ def test_copilot_responses_stream_incomplete_maps_to_length():
     ]
 
     assert finish_reasons == ["length"]
+
+
+def test_copilot_responses_stream_incomplete_tool_call_does_not_finish_as_tool_calls():
+    events = [
+        SimpleNamespace(
+            type="response.output_item.added",
+            output_index=0,
+            item=SimpleNamespace(type="function_call", call_id="call_1", name="bash"),
+        ),
+        SimpleNamespace(type="response.function_call_arguments.delta", output_index=0, delta='{"command":"echo'),
+        SimpleNamespace(
+            type="response.incomplete",
+            response=SimpleNamespace(
+                incomplete_details=SimpleNamespace(reason="max_output_tokens"),
+                usage=None,
+            ),
+        ),
+    ]
+    client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    chunks = list(_CopilotResponsesStream(client, cfg, [{"role": "user", "content": "hi"}], [], 50))
+
+    assert chunks[-1].finish_reason == "length"
+
+
+def test_copilot_responses_stream_rejects_other_incomplete_reasons():
+    events = [
+        SimpleNamespace(
+            type="response.incomplete",
+            response=SimpleNamespace(
+                incomplete_details=SimpleNamespace(reason="content_filter"),
+                usage=None,
+            ),
+        ),
+    ]
+    client = _FakeResponsesClient(events=events)
+    cfg = ModelConfig(name="copilot-gpt", provider="copilot", model="gpt-5.6-sol", responses_api=True)
+
+    with pytest.raises(RuntimeError, match="content_filter"):
+        list(_CopilotResponsesStream(client, cfg, [{"role": "user", "content": "hi"}], [], 50))
 
 
 def test_copilot_responses_stream_failed_event_raises():

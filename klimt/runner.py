@@ -138,7 +138,8 @@ def run_turn(
         if text_open:
             emit({"type": "text_end"})
 
-        if not interrupted and finish_reason and finish_reason not in _NORMAL_FINISH_REASONS:
+        incomplete = bool(finish_reason and finish_reason not in _NORMAL_FINISH_REASONS)
+        if not interrupted and incomplete:
             emit({"type": "error", "message": _finish_reason_message(finish_reason, max_tokens)})
 
         assistant_entry = _build_assistant_entry(
@@ -147,12 +148,15 @@ def run_turn(
             reasoning_signature=reasoning_signature,
             usage=usage,
             finish_reason=finish_reason,
-            tool_calls=tool_calls,
+            tool_calls={} if incomplete and not interrupted else tool_calls,
             interrupted=interrupted,
         )
         # Always append, even on interrupt, so the partial work is visible in
         # the transcript and the next turn has context for "do X instead".
         history.append(assistant_entry)
+
+        if incomplete and not interrupted:
+            return True
 
         if not tool_calls:
             if interrupted:

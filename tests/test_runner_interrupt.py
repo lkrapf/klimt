@@ -267,3 +267,33 @@ def test_interrupted_field_not_sent_to_provider():
     assert "interrupted" not in assistant_sent
     # Content (with marker) is preserved so the model sees context.
     assert "[interrupted by user]" in assistant_sent["content"]
+
+
+def test_token_limited_tool_call_is_not_executed_or_replayed():
+    provider = _ProviderScripted([
+        _text("Starting "),
+        _tool(0, "call-x", "bash", '{"command": "echo', finish="length"),
+    ])
+    history: list[dict] = [{"role": "user", "content": "go"}]
+    events, emit = _emit_sink()
+    dispatched: list[str] = []
+
+    completed = runner.run_turn(
+        provider=provider,
+        system="sys",
+        history=history,
+        max_tokens=20,
+        cancel=threading.Event(),
+        active_lock=threading.Lock(),
+        active_stream_ref={"stream": None},
+        emit=emit,
+        dispatch=lambda name, args: dispatched.append(name) or "ran",
+    )
+
+    assert completed is True
+    assert dispatched == []
+    assert history[-1]["content"] == "Starting "
+    assert history[-1]["finish_reason"] == "length"
+    assert "tool_calls" not in history[-1]
+    assert not any(event["type"] == "tool_start" for event in events)
+    assert any(event["type"] == "error" and "token limit" in event["message"] for event in events)
